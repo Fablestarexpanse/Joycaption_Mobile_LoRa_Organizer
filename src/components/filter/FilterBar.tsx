@@ -1,7 +1,7 @@
-import { Search, X, Smile, Frown, Wrench, CheckSquare } from "lucide-react";
+import { Search, X, Smile, Frown, Wrench, CheckSquare, ArrowUp, ArrowDown } from "lucide-react";
 import { useFilterStore } from "@/stores/filterStore";
 import { useSelectionStore } from "@/stores/selectionStore";
-import type { ImageRating } from "@/types";
+import type { ImageRating, SortBy, SortOrder } from "@/types";
 
 export function FilterBar() {
   const query = useFilterStore((s) => s.query);
@@ -10,6 +10,10 @@ export function FilterBar() {
   const setShowCaptioned = useFilterStore((s) => s.setShowCaptioned);
   const ratingFilter = useFilterStore((s) => s.ratingFilter);
   const setRatingFilter = useFilterStore((s) => s.setRatingFilter);
+  const sortBy = useFilterStore((s) => s.sortBy);
+  const setSortBy = useFilterStore((s) => s.setSortBy);
+  const sortOrder = useFilterStore((s) => s.sortOrder);
+  const setSortOrder = useFilterStore((s) => s.setSortOrder);
   const resetFilters = useFilterStore((s) => s.resetFilters);
 
   const selectedIds = useSelectionStore((s) => s.selectedIds);
@@ -22,16 +26,16 @@ export function FilterBar() {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-elevated px-3 py-2">
-      {/* Search input */}
-      <div className="relative min-w-[200px] flex-1">
-        <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-elevated px-2 py-1.5">
+      {/* Search input — shrinks with window, max width so tools stay visible */}
+      <div className="relative min-w-[72px] max-w-[160px] flex-1 shrink basis-24">
+        <Search className="absolute left-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500 pointer-events-none" />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by filename or tag..."
-          className="w-full rounded border border-border bg-surface py-1 pl-8 pr-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+          placeholder="Search…"
+          className="w-full min-w-0 rounded border border-border bg-surface py-0.5 pl-6 pr-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
         />
       </div>
 
@@ -58,6 +62,77 @@ export function FilterBar() {
           }`}
         >
           Captioned
+        </button>
+      </div>
+
+      {/* Sort */}
+      <div className="flex items-center gap-1 border-l border-border pl-2">
+        <span className="mr-1 text-xs text-gray-500">Sort:</span>
+        <button
+          type="button"
+          onClick={() => setSortBy("name")}
+          className={`rounded px-2 py-1 text-xs ${
+            sortBy === "name"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+          title="Sort by name (default)"
+        >
+          Name
+        </button>
+        <button
+          type="button"
+          onClick={() => setSortBy("file_size")}
+          className={`rounded px-2 py-1 text-xs ${
+            sortBy === "file_size"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+          title="Sort by file size"
+        >
+          Size
+        </button>
+        <button
+          type="button"
+          onClick={() => setSortBy("extension")}
+          className={`rounded px-2 py-1 text-xs ${
+            sortBy === "extension"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+          title="Sort by extension"
+        >
+          Ext
+        </button>
+        <button
+          type="button"
+          onClick={() => setSortBy("dimension")}
+          className={`rounded px-2 py-1 text-xs ${
+            sortBy === "dimension"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+          title="Sort by dimensions (width × height)"
+        >
+          Dim
+        </button>
+        <span className="mx-1 h-3 w-px bg-gray-600" aria-hidden />
+        <button
+          type="button"
+          onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+          className={`flex items-center gap-0.5 rounded px-2 py-1 text-xs ${
+            sortOrder === "asc"
+              ? "bg-gray-600 text-gray-200"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+          title={sortOrder === "asc" ? "Ascending (click for descending)" : "Descending (click for ascending)"}
+        >
+          {sortOrder === "asc" ? (
+            <ArrowUp className="h-3 w-3" />
+          ) : (
+            <ArrowDown className="h-3 w-3" />
+          )}
+          {sortOrder === "asc" ? "Asc" : "Desc"}
         </button>
       </div>
 

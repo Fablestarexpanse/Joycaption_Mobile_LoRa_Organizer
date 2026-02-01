@@ -15,6 +15,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setThumbnailSize,
     autoSelectFirst,
     setAutoSelectFirst,
+    confirmBeforeClearTags,
+    setConfirmBeforeClearTags,
   } = useSettingsStore();
 
   const { lmStudio, setLmStudioUrl, joyCaption, setJoyCaptionPythonPath } =
@@ -90,6 +92,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   Auto-select first image when opening folder
                 </span>
               </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={confirmBeforeClearTags}
+                  onChange={(e) => setConfirmBeforeClearTags(e.target.checked)}
+                  className="rounded border-gray-600"
+                />
+                <span className="text-sm text-gray-300">
+                  Confirm before clearing tags on an image
+                </span>
+              </label>
+              {!confirmBeforeClearTags && (
+                <p className="text-xs text-amber-500">
+                  When disabled, clearing tags will happen immediately and you
+                  won&apos;t get a chance to cancel.
+                </p>
+              )}
             </div>
           </section>
 

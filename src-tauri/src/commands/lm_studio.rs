@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -227,6 +228,10 @@ pub async fn generate_caption_lm_studio(
     })
 }
 
+fn default_batch_concurrency() -> u32 {
+    2
+}
+
 #[derive(Debug, Deserialize)]
 pub struct BatchCaptionPayload {
     pub image_paths: Vec<String>,
@@ -237,6 +242,9 @@ pub struct BatchCaptionPayload {
     pub prompt: String,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    /// Max concurrent requests (1 = sequential, 2–3 recommended).
+    #[serde(default = "default_batch_concurrency")]
+    pub concurrency: u32,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -247,31 +255,66 @@ pub struct BatchCaptionResult {
     pub error: Option<String>,
 }
 
-/// Generate captions for multiple images. Returns results as they complete.
+/// Generate captions for multiple images with bounded concurrency.
+/// Results are returned in the same order as image_paths.
 #[tauri::command]
 pub async fn generate_captions_batch(
     payload: BatchCaptionPayload,
 ) -> Result<Vec<BatchCaptionResult>, String> {
-    let mut results = Vec::new();
+    let concurrency = payload.concurrency.max(1).min(8) as usize;
 
-    for image_path in payload.image_paths {
-        let single_payload = GenerateCaptionPayload {
-            image_path: image_path.clone(),
-            base_url: payload.base_url.clone(),
-            model: payload.model.clone(),
-            prompt: payload.prompt.clone(),
-            max_tokens: payload.max_tokens,
-        };
+    let base_url = payload.base_url.clone();
+    let model = payload.model.clone();
+    let prompt = payload.prompt.clone();
+    let max_tokens = payload.max_tokens;
 
-        let result = generate_caption_lm_studio(single_payload).await?;
-
-        results.push(BatchCaptionResult {
-            path: image_path,
-            success: result.success,
-            caption: result.caption,
-            error: result.error,
+    let futures = payload
+        .image_paths
+        .into_iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let base_url = base_url.clone();
+            let model = model.clone();
+            let prompt = prompt.clone();
+            let single_payload = GenerateCaptionPayload {
+                image_path: path.clone(),
+                base_url,
+                model,
+                prompt,
+                max_tokens,
+            };
+            async move {
+                let result = generate_caption_lm_studio(single_payload).await;
+                (index, path, result)
+            }
         });
-    }
+
+    let mut completed: Vec<(usize, String, Result<CaptionResult, String>)> = stream::iter(futures)
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
+    completed.sort_by_key(|(i, _, _)| *i);
+
+    let results: Vec<BatchCaptionResult> = completed
+        .into_iter()
+        .map(|(_, path, result)| {
+            match result {
+                Ok(r) => BatchCaptionResult {
+                    path,
+                    success: r.success,
+                    caption: r.caption,
+                    error: r.error,
+                },
+                Err(e) => BatchCaptionResult {
+                    path,
+                    success: false,
+                    caption: String::new(),
+                    error: Some(e),
+                },
+            }
+        })
+        .collect();
 
     Ok(results)
 }

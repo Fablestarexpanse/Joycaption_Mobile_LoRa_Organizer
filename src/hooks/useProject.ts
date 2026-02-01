@@ -13,12 +13,24 @@ export function useProjectImages() {
     enabled: !!rootPath,
   });
 
-  // Turn off loading overlay when query settles (success or error)
+  const setProjectDataReady = useProjectStore((s) => s.setProjectDataReady);
+
+  // Keep overlay up until query settles, then stay up a bit longer so the grid can render/load thumbnails
   useEffect(() => {
-    if (query.isSuccess || query.isError) {
+    if (query.isError) {
       setIsLoadingProject(false);
+      setProjectDataReady(false);
+      return;
     }
-  }, [query.isSuccess, query.isError, setIsLoadingProject]);
+    if (query.isSuccess) {
+      setProjectDataReady(true);
+      const t = setTimeout(() => {
+        setIsLoadingProject(false);
+        setProjectDataReady(false);
+      }, 2500);
+      return () => clearTimeout(t);
+    }
+  }, [query.isSuccess, query.isError, setIsLoadingProject, setProjectDataReady]);
 
   return query;
 }

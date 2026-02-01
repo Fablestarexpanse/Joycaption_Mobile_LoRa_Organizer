@@ -9,6 +9,9 @@ import type {
   BatchCaptionResult,
   ExportOptions,
   ExportResult,
+  ExportByRatingOptions,
+  BatchRenameOptions,
+  BatchRenameResult,
 } from "@/types";
 
 export async function openFolder(): Promise<string | null> {
@@ -33,6 +36,41 @@ export async function getThumbnailDataUrl(
   return invoke<string>("get_thumbnail", {
     payload: { path, size },
   });
+}
+
+/** Load image as data URL for preview/crop (works without asset protocol). */
+export async function getImageDataUrl(
+  path: string,
+  maxSide?: number
+): Promise<string> {
+  return invoke<string>("get_image_data_url", {
+    payload: { path, max_side: maxSide ?? 0 },
+  });
+}
+
+export interface CropImagePayload {
+  image_path: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  flip_x?: boolean;
+  flip_y?: boolean;
+  rotate_degrees?: number;
+  /** If true, save to a new file (keeps original). Returns new path. */
+  save_as_new?: boolean;
+}
+
+/** Crops image. Returns new path when save_as_new is true, else undefined. */
+export async function cropImage(
+  payload: CropImagePayload
+): Promise<string | undefined> {
+  return invoke<string | undefined>("crop_image", { payload });
+}
+
+/** Deletes an image file and its caption .txt from disk. */
+export async function deleteImage(imagePath: string): Promise<void> {
+  return invoke<void>("delete_image", { image_path: imagePath });
 }
 
 export async function readCaption(path: string): Promise<CaptionData> {
@@ -77,6 +115,14 @@ export async function testLmStudioConnection(
   baseUrl: string
 ): Promise<ConnectionStatus> {
   return invoke<ConnectionStatus>("test_lm_studio_connection", {
+    payload: { base_url: baseUrl },
+  });
+}
+
+export async function testOllamaConnection(
+  baseUrl: string
+): Promise<ConnectionStatus> {
+  return invoke<ConnectionStatus>("test_ollama_connection", {
     payload: { base_url: baseUrl },
   });
 }
@@ -170,6 +216,12 @@ export async function selectSaveFolder(): Promise<string | null> {
   return selected;
 }
 
+export async function exportByRating(
+  options: ExportByRatingOptions
+): Promise<ExportResult> {
+  return invoke<ExportResult>("export_by_rating", { options });
+}
+
 export async function selectSaveFile(
   defaultName: string
 ): Promise<string | null> {
@@ -202,6 +254,16 @@ export async function getImageRatings(
 ): Promise<Record<string, string>> {
   return invoke<Record<string, string>>("get_ratings", {
     payload: { root_path: rootPath },
+  });
+}
+
+// ============ Batch Rename ============
+
+export async function batchRename(
+  options: BatchRenameOptions
+): Promise<BatchRenameResult> {
+  return invoke<BatchRenameResult>("batch_rename", {
+    payload: options,
   });
 }
 

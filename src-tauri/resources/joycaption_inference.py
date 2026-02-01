@@ -1,7 +1,10 @@
 """
 JoyCaption inference script for LoRA Dataset Studio.
 Uses John6666/llama-joycaption-beta-one-hf-llava-nf4 (4-bit).
-Usage: python joycaption_inference.py --image <path> [--mode descriptive|straightforward|booru] [--low-vram]
+Usage:
+  Single: python joycaption_inference.py --image <path> [--mode ...] [--low-vram]
+  Batch:  python joycaption_inference.py --image <path1> --image <path2> ... [--mode ...] [--low-vram]
+Output: One caption per line (same order as --image). Newlines in captions are replaced by space.
 """
 import argparse
 import sys
@@ -32,14 +35,18 @@ MODE_PROMPTS = {
 
 DEFAULT_PROMPT = MODE_PROMPTS["descriptive"]
 
+# Delimiter for batch output: each line = one caption (newlines in caption replaced by this)
+OUTPUT_LINE_SEP = "\n"
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image", required=True, help="Path to image")
+    parser.add_argument("--image", action="append", required=True, help="Path to image (repeat for batch)")
     parser.add_argument("--mode", default="descriptive", choices=list(MODE_PROMPTS.keys()))
     parser.add_argument("--low-vram", action="store_true")
     args = parser.parse_args()
 
+    image_paths = args.image
     prompt = MODE_PROMPTS.get(args.mode, DEFAULT_PROMPT)
 
     try:
@@ -55,19 +62,13 @@ def main():
     if device == "cpu":
         print("Warning: No GPU. Running on CPU (slow).", file=sys.stderr)
 
-    try:
-        image = Image.open(args.image).convert("RGB")
-    except Exception as e:
-        print(f"Error opening image: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    # Load processor and model once
     try:
         processor = AutoProcessor.from_pretrained(model_id)
     except Exception as e:
         print(f"Error loading processor: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 4-bit config for the nf4 model (saves VRAM)
     bnb_config = None
     if device == "cuda" and (args.low_vram or "nf4" in model_id):
         bnb_config = BitsAndBytesConfig(
@@ -97,26 +98,38 @@ def main():
     convo_string = processor.apply_chat_template(convo, tokenize=False, add_generation_prompt=True)
     assert isinstance(convo_string, str)
 
-    inputs = processor(text=[convo_string], images=[image], return_tensors="pt")
-    inputs = {k: v.to(model.device) if hasattr(v, "to") else v for k, v in inputs.items()}
-    if "pixel_values" in inputs:
-        inputs["pixel_values"] = inputs["pixel_values"].to(torch.float16)
+    lines = []
+    for idx, image_path in enumerate(image_paths):
+        try:
+            image = Image.open(image_path).convert("RGB")
+        except Exception as e:
+            print(f"Error opening image {image_path!r}: {e}", file=sys.stderr)
+            lines.append("")
+            continue
 
-    with torch.no_grad():
-        generate_ids = model.generate(
-            **inputs,
-            max_new_tokens=512,
-            do_sample=True,
-            temperature=0.6,
-            top_p=0.9,
-        )[0]
+        inputs = processor(text=[convo_string], images=[image], return_tensors="pt")
+        inputs = {k: v.to(model.device) if hasattr(v, "to") else v for k, v in inputs.items()}
+        if "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].to(torch.float16)
 
-    generate_ids = generate_ids[inputs["input_ids"].shape[1]:]
-    caption = processor.tokenizer.decode(
-        generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-    )
-    caption = caption.strip()
-    print(caption)
+        with torch.no_grad():
+            generate_ids = model.generate(
+                **inputs,
+                max_new_tokens=512,
+                do_sample=True,
+                temperature=0.6,
+                top_p=0.9,
+            )[0]
+
+        generate_ids = generate_ids[inputs["input_ids"].shape[1]:]
+        caption = processor.tokenizer.decode(
+            generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+        caption = caption.strip().replace("\n", " ")
+        lines.append(caption)
+
+    # One caption per line (order matches image_paths)
+    print(OUTPUT_LINE_SEP.join(lines))
 
 
 if __name__ == "__main__":

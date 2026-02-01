@@ -49,3 +49,6 @@ venv/
 *.tmp
 *.temp
 *.bak
+
+# Plans (optional local)
+*.plan.md

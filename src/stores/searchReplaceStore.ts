@@ -15,6 +15,11 @@ interface SearchReplaceState {
   /** Current search text for live highlighting in tags */
   searchHighlightText: string;
   setSearchHighlightText: (text: string) => void;
+
+  /** Add tag to all: live preview in image tag section */
+  addTagPreviewText: string;
+  addTagPreviewAtFront: boolean;
+  setAddTagPreview: (text: string, atFront: boolean) => void;
 }
 
 export const useSearchReplaceStore = create<SearchReplaceState>((set) => ({
@@ -24,4 +29,9 @@ export const useSearchReplaceStore = create<SearchReplaceState>((set) => ({
 
   searchHighlightText: "",
   setSearchHighlightText: (text) => set({ searchHighlightText: text }),
+
+  addTagPreviewText: "",
+  addTagPreviewAtFront: true,
+  setAddTagPreview: (text, atFront) =>
+    set({ addTagPreviewText: text, addTagPreviewAtFront: atFront }),
 }));

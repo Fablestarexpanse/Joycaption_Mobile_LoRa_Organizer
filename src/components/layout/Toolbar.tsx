@@ -1,17 +1,22 @@
 import { useState } from "react";
-import { FolderOpen, Download, Settings, HelpCircle } from "lucide-react";
+import { FolderOpen, Download, FileEdit, Settings, HelpCircle, Eraser } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { openFolder } from "@/lib/tauri";
 import { ExportModal } from "../export/ExportModal";
+import { BatchRenameModal } from "../rename/BatchRenameModal";
 import { SettingsModal } from "../settings/SettingsModal";
 import { HelpModal } from "../help/HelpModal";
+import { ClearAllTagsModal } from "./ClearAllTagsModal";
 
 export function Toolbar() {
   const rootPath = useProjectStore((s) => s.rootPath);
   const setRootPath = useProjectStore((s) => s.setRootPath);
   const setIsLoadingProject = useProjectStore((s) => s.setIsLoadingProject);
+  const setLastOpenedFolder = useProjectStore((s) => s.setLastOpenedFolder);
 
   const [showExport, setShowExport] = useState(false);
+  const [showBatchRename, setShowBatchRename] = useState(false);
+  const [showClearAllTags, setShowClearAllTags] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -19,6 +24,7 @@ export function Toolbar() {
     try {
       const path = await openFolder();
       if (path) {
+        setLastOpenedFolder(path);
         setIsLoadingProject(true);
         setRootPath(path);
       }
@@ -54,6 +60,30 @@ export function Toolbar() {
           Export
         </button>
 
+        {/* Batch Rename */}
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium text-gray-200 hover:bg-white/10 disabled:opacity-50"
+          aria-label="Batch rename"
+          onClick={() => setShowBatchRename(true)}
+          disabled={!rootPath}
+        >
+          <FileEdit className="h-4 w-4" />
+          Batch Rename
+        </button>
+
+        {/* Clear all tags */}
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium text-gray-200 hover:bg-amber-600/20 hover:text-amber-400 disabled:opacity-50"
+          aria-label="Clear all tags on all images"
+          onClick={() => setShowClearAllTags(true)}
+          disabled={!rootPath}
+        >
+          <Eraser className="h-4 w-4" />
+          Clear All Tags
+        </button>
+
         <span className="text-xs text-gray-500">|</span>
 
         {/* Title */}
@@ -81,6 +111,11 @@ export function Toolbar() {
 
       {/* Modals */}
       <ExportModal isOpen={showExport} onClose={() => setShowExport(false)} />
+      <BatchRenameModal isOpen={showBatchRename} onClose={() => setShowBatchRename(false)} />
+      <ClearAllTagsModal
+        isOpen={showClearAllTags}
+        onClose={() => setShowClearAllTags(false)}
+      />
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
     </>

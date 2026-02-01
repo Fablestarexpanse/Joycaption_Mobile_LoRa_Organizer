@@ -10,6 +10,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::project::open_project,
             commands::images::get_thumbnail,
+            commands::images::get_image_data_url,
+            commands::images::crop_image,
+            commands::images::delete_image,
             commands::captions::read_caption,
             commands::captions::write_caption,
             commands::captions::add_tag,
@@ -18,13 +21,16 @@ pub fn run() {
             commands::lm_studio::test_lm_studio_connection,
             commands::lm_studio::generate_caption_lm_studio,
             commands::lm_studio::generate_captions_batch,
+            commands::ollama::test_ollama_connection,
             commands::joycaption::generate_caption_joycaption,
             commands::joycaption::generate_captions_joycaption_batch,
             commands::export::export_dataset,
+            commands::export::export_by_rating,
             commands::ratings::set_rating,
             commands::ratings::get_ratings,
             commands::joycaption_installer::joycaption_install_status,
             commands::joycaption_installer::joycaption_install,
+            commands::batch_rename::batch_rename,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LoRA Dataset Studio");

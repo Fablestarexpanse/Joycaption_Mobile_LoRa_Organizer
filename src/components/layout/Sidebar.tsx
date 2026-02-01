@@ -1,10 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Folder, Replace, RotateCcw, Loader2, HelpCircle } from "lucide-react";
+import { Folder, Replace, RotateCcw, Loader2, HelpCircle, Tag, Lock, Unlock } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useProjectImages } from "@/hooks/useProject";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useSearchReplaceStore } from "@/stores/searchReplaceStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { writeCaption } from "@/lib/tauri";
 import { useMemo } from "react";
 
@@ -18,8 +19,23 @@ export function Sidebar() {
   const [replaceText, setReplaceText] = useState("");
   const [useRegex, setUseRegex] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const triggerWord = useSettingsStore((s) => s.triggerWord);
+  const setTriggerWord = useSettingsStore((s) => s.setTriggerWord);
+  const previousTriggerWord = useSettingsStore((s) => s.previousTriggerWord);
+  const setPreviousTriggerWord = useSettingsStore((s) => s.setPreviousTriggerWord);
+  const triggerWordLocked = useSettingsStore((s) => s.triggerWordLocked);
+  const setTriggerWordLocked = useSettingsStore((s) => s.setTriggerWordLocked);
+  const [addTagToAllText, setAddTagToAllText] = useState("");
+  const [addTagAtFront, setAddTagAtFront] = useState(true);
+  const [addTagResult, setAddTagResult] = useState<string | null>(null);
 
-  const { lastBatch, pushBatch, clearLastBatch, setSearchHighlightText } = useSearchReplaceStore();
+  const {
+    lastBatch,
+    pushBatch,
+    clearLastBatch,
+    setSearchHighlightText,
+    setAddTagPreview,
+  } = useSearchReplaceStore();
 
   const invalidateProject = useCallback(() => {
     if (rootPath) {
@@ -101,6 +117,98 @@ export function Sidebar() {
     setSearchHighlightText("");
     setLastResult(null);
   }, [setSearchHighlightText]);
+
+  const applyTriggerWordMutation = useMutation({
+    mutationFn: async ({
+      newWord,
+      oldWord,
+    }: { newWord: string; oldWord: string }) => {
+      const newTrim = newWord.trim();
+      const oldTrim = oldWord.trim();
+      let applied = 0;
+      for (const img of images) {
+        let tags = img.tags ?? [];
+        if (oldTrim) {
+          tags = tags.filter(
+            (t) => t.trim().toLowerCase() !== oldTrim.toLowerCase()
+          );
+        }
+        const newTags = newTrim ? [newTrim, ...tags] : tags;
+        if (JSON.stringify(newTags) !== JSON.stringify(img.tags ?? [])) {
+          await writeCaption(img.path, newTags);
+          applied += 1;
+        }
+      }
+      return { applied, total: images.length };
+    },
+    onSuccess: (_result, { newWord }) => {
+      invalidateProject();
+      setPreviousTriggerWord(newWord.trim());
+    },
+  });
+
+  const triggerWordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (triggerWordLocked || !rootPath || images.length === 0) return;
+    if (triggerWordDebounceRef.current) {
+      clearTimeout(triggerWordDebounceRef.current);
+    }
+    triggerWordDebounceRef.current = setTimeout(() => {
+      triggerWordDebounceRef.current = null;
+      const newWord = triggerWord.trim();
+      const oldWord = previousTriggerWord.trim();
+      if (newWord === oldWord) return;
+      applyTriggerWordMutation.mutate({ newWord: triggerWord, oldWord: previousTriggerWord });
+    }, 600);
+    return () => {
+      if (triggerWordDebounceRef.current) {
+        clearTimeout(triggerWordDebounceRef.current);
+      }
+    };
+  }, [triggerWord, previousTriggerWord, triggerWordLocked, rootPath, images.length]);
+
+  const addTagToAllMutation = useMutation({
+    mutationFn: async () => {
+      const tag = addTagToAllText.trim();
+      if (!tag) return { applied: 0, total: images.length };
+      const tw = triggerWord.trim();
+      let applied = 0;
+      for (const img of images) {
+        const tags = img.tags ?? [];
+        const restWithoutTrigger = tw
+          ? tags.filter((t) => t.trim().toLowerCase() !== tw.toLowerCase())
+          : tags;
+        let newTags: string[];
+        if (addTagAtFront) {
+          if (tw) {
+            newTags = [tw, tag, ...restWithoutTrigger];
+          } else {
+            newTags = [tag, ...tags];
+          }
+        } else {
+          if (tw) {
+            newTags = [tw, ...restWithoutTrigger, tag];
+          } else {
+            newTags = [...tags, tag];
+          }
+        }
+        await writeCaption(img.path, newTags);
+        applied += 1;
+      }
+      return { applied, total: images.length };
+    },
+    onSuccess: (result) => {
+      invalidateProject();
+      setAddTagPreview("", true);
+      setAddTagToAllText("");
+      setAddTagResult(null);
+      if (result && result.total > 0) {
+        setAddTagResult(
+          `Added tag to ${result.applied} image${result.applied === 1 ? "" : "s"}`
+        );
+      }
+    },
+  });
 
   // Compute tag statistics
   const stats = useMemo(() => {
@@ -227,6 +335,104 @@ export function Sidebar() {
         </div>
       </div>
 
+      {/* Add tag to all — live preview in image tag section */}
+      <div className="border-b border-border p-3">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+          Add tag to all
+        </p>
+        <p className="mb-2 text-[10px] text-gray-500">
+          As you type, the tag is previewed on each image. Apply to add at front or end of tags.
+        </p>
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={addTagToAllText}
+            onChange={(e) => {
+              const v = e.target.value;
+              setAddTagToAllText(v);
+              setAddTagPreview(v, addTagAtFront);
+              setAddTagResult(null);
+            }}
+            placeholder="e.g. 1girl, landscape"
+            className="w-full min-w-0 rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+          />
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400 hover:text-gray-200">
+            <input
+              type="checkbox"
+              checked={addTagAtFront}
+              onChange={(e) => {
+                const atFront = e.target.checked;
+                setAddTagAtFront(atFront);
+                setAddTagPreview(addTagToAllText, atFront);
+              }}
+              className="rounded border-gray-600"
+            />
+            Add at front
+          </label>
+          <button
+            type="button"
+            onClick={() => addTagToAllMutation.mutate()}
+            disabled={!addTagToAllText.trim() || addTagToAllMutation.isPending}
+            className="flex w-full items-center justify-center gap-1.5 rounded bg-blue-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+          >
+            {addTagToAllMutation.isPending ? (
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+            ) : (
+              <Tag className="h-3 w-3 shrink-0" />
+            )}
+            Apply to all
+          </button>
+        </div>
+        {addTagResult && (
+          <p className="mt-1.5 text-xs text-gray-400">{addTagResult}</p>
+        )}
+      </div>
+
+      {/* Set trigger word — lock to prevent accidental changes */}
+      <div className="border-b border-border p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Set trigger word
+          </p>
+          <button
+            type="button"
+            onClick={() => setTriggerWordLocked(!triggerWordLocked)}
+            className={`rounded p-1 transition-colors ${
+              triggerWordLocked
+                ? "bg-purple-600 text-white"
+                : "text-gray-500 hover:bg-gray-600 hover:text-gray-200"
+            }`}
+            title={triggerWordLocked ? "Unlock to change trigger word" : "Lock trigger word"}
+            aria-label={triggerWordLocked ? "Unlock" : "Lock"}
+          >
+            {triggerWordLocked ? (
+              <Lock className="h-3.5 w-3.5" />
+            ) : (
+              <Unlock className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </div>
+        <p className="mb-2 text-[10px] text-gray-500">
+          Type the trigger word; it updates on all images as you type. Lock to prevent accidental changes. Always at front and highlighted in purple.
+        </p>
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={triggerWord}
+            onChange={(e) => setTriggerWord(e.target.value)}
+            disabled={triggerWordLocked}
+            placeholder="e.g. mytrigger"
+            className="w-full min-w-0 rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 disabled:bg-gray-800/50"
+          />
+          {applyTriggerWordMutation.isPending && (
+            <p className="text-xs text-gray-400 flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Updating…
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Keyboard hints */}
       <div className="border-t border-border p-3">
         <p className="mb-1 flex items-center gap-1 text-xs text-gray-500">
@@ -235,6 +441,9 @@ export function Sidebar() {
         </p>
         <div className="space-y-0.5 text-xs text-gray-600">
           <p><kbd className="rounded bg-gray-700 px-1">←→↑↓</kbd> Navigate</p>
+          <p><kbd className="rounded bg-gray-700 px-1">1</kbd> Good</p>
+          <p><kbd className="rounded bg-gray-700 px-1">2</kbd> Bad</p>
+          <p><kbd className="rounded bg-gray-700 px-1">3</kbd> Needs edit</p>
           <p><kbd className="rounded bg-gray-700 px-1">T</kbd> Focus tag input</p>
           <p><kbd className="rounded bg-gray-700 px-1">Enter</kbd> Add tag</p>
         </div>

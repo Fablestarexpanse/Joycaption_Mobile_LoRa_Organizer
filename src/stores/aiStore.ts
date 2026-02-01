@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AiProvider, PromptTemplate, LmStudioSettings, JoyCaptionSettings } from "@/types";
+import type { AiProvider, PromptTemplate, LmStudioSettings, OllamaSettings, JoyCaptionSettings } from "@/types";
 import { DEFAULT_PROMPT_TEMPLATES } from "@/types";
 
 interface AiState {
@@ -16,6 +16,11 @@ interface AiState {
   lmStudio: LmStudioSettings;
   setLmStudioUrl: (url: string) => void;
   setLmStudioModel: (model: string | null) => void;
+
+  // Ollama settings
+  ollama: OllamaSettings;
+  setOllamaBaseUrl: (url: string) => void;
+  setOllamaModel: (model: string | null) => void;
 
   // JoyCaption settings
   joyCaption: JoyCaptionSettings;
@@ -66,6 +71,20 @@ export const useAiStore = create<AiState>()(
       setLmStudioModel: (model) =>
         set((state) => ({
           lmStudio: { ...state.lmStudio, model },
+        })),
+
+      // Ollama
+      ollama: {
+        base_url: "http://localhost:11434/v1",
+        model: null,
+      },
+      setOllamaBaseUrl: (url) =>
+        set((state) => ({
+          ollama: { ...state.ollama, base_url: url },
+        })),
+      setOllamaModel: (model) =>
+        set((state) => ({
+          ollama: { ...state.ollama, model },
         })),
 
       // JoyCaption
@@ -124,6 +143,7 @@ export const useAiStore = create<AiState>()(
         provider: state.provider,
         customPrompt: state.customPrompt,
         lmStudio: state.lmStudio,
+        ollama: state.ollama,
         joyCaption: state.joyCaption,
         promptTemplates: state.promptTemplates,
         selectedTemplateId: state.selectedTemplateId,

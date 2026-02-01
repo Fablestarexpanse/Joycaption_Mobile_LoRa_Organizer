@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -12,6 +12,7 @@ import {
   Settings,
   Download,
   CheckCircle,
+  Square,
 } from "lucide-react";
 import { useAiStore } from "@/stores/aiStore";
 import { useSelectionStore } from "@/stores/selectionStore";
@@ -19,6 +20,7 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useProjectImages } from "@/hooks/useProject";
 import {
   testLmStudioConnection,
+  testOllamaConnection,
   generateCaptionLmStudio,
   generateCaptionsBatch,
   generateCaptionJoyCaption,
@@ -32,6 +34,7 @@ import {
 export function AiPanel() {
   const [showSettings, setShowSettings] = useState(false);
   const [previewCaption, setPreviewCaption] = useState<string | null>(null);
+  const cancelBatchRef = useRef(false);
 
   const queryClient = useQueryClient();
   const rootPath = useProjectStore((s) => s.rootPath);
@@ -46,6 +49,9 @@ export function AiPanel() {
     lmStudio,
     setLmStudioUrl,
     setLmStudioModel,
+    ollama,
+    setOllamaBaseUrl,
+    setOllamaModel,
     joyCaption,
     setJoyCaptionPythonPath,
     setJoyCaptionScriptPath,
@@ -104,13 +110,20 @@ export function AiPanel() {
     onError: () => setInstallProgress(null),
   });
 
-  // Test connection mutation (LM Studio only)
+  // Test connection mutation (LM Studio or Ollama)
   const testConnectionMutation = useMutation({
-    mutationFn: () => testLmStudioConnection(lmStudio.base_url),
+    mutationFn: () =>
+      provider === "ollama"
+        ? testOllamaConnection(ollama.base_url)
+        : testLmStudioConnection(lmStudio.base_url),
     onSuccess: (status) => {
       setConnectionStatus(status.connected, status.models);
-      if (status.models.length > 0 && !lmStudio.model) {
-        setLmStudioModel(status.models[0]);
+      if (status.models.length > 0) {
+        if (provider === "ollama" && !ollama.model) {
+          setOllamaModel(status.models[0]);
+        } else if (provider === "lm_studio" && !lmStudio.model) {
+          setLmStudioModel(status.models[0]);
+        }
       }
     },
   });
@@ -123,11 +136,13 @@ export function AiPanel() {
     mutationFn: async () => {
       if (!selectedImage) return null;
 
-      if (provider === "lm_studio") {
+      if (provider === "lm_studio" || provider === "ollama") {
+        const baseUrl = provider === "ollama" ? ollama.base_url : lmStudio.base_url;
+        const model = provider === "ollama" ? ollama.model : lmStudio.model;
         return generateCaptionLmStudio(
           selectedImage.path,
-          lmStudio.base_url,
-          lmStudio.model,
+          baseUrl,
+          model,
           effectivePrompt
         );
       } else {
@@ -173,19 +188,25 @@ export function AiPanel() {
 
     setIsGenerating(true);
     setGenerationProgress(0, targetImages.length);
+    cancelBatchRef.current = false;
 
     try {
-      const chunkSize = 5;
+      // JoyCaption batch loads model once per chunk; use larger chunks. LM Studio is sequential.
+      const chunkSize = provider === "joycaption" ? 20 : 5;
       for (let i = 0; i < targetImages.length; i += chunkSize) {
+        if (cancelBatchRef.current) break;
+
         const chunk = targetImages.slice(i, i + chunkSize);
         const paths = chunk.map((img) => img.path);
 
         let results;
-        if (provider === "lm_studio") {
+        if (provider === "lm_studio" || provider === "ollama") {
+          const baseUrl = provider === "ollama" ? ollama.base_url : lmStudio.base_url;
+          const model = provider === "ollama" ? ollama.model : lmStudio.model;
           results = await generateCaptionsBatch(
             paths,
-            lmStudio.base_url,
-            lmStudio.model,
+            baseUrl,
+            model,
             effectivePrompt
           );
         } else {
@@ -212,11 +233,16 @@ export function AiPanel() {
         setGenerationProgress(Math.min(i + chunkSize, targetImages.length), targetImages.length);
       }
     } finally {
+      cancelBatchRef.current = false;
       setIsGenerating(false);
       if (rootPath) {
         queryClient.invalidateQueries({ queryKey: ["project", "images", rootPath] });
       }
     }
+  }
+
+  function handleStopCaptioning() {
+    cancelBatchRef.current = true;
   }
 
   const uncaptionedCount = images.filter((img) => !img.has_caption).length;
@@ -232,13 +258,12 @@ export function AiPanel() {
           <span className="text-sm font-medium text-gray-200">AI Captioning</span>
         </div>
         <div className="flex items-center gap-2">
-          {provider === "lm_studio" && (
-            isConnected ? (
+          {(provider === "lm_studio" || provider === "ollama") &&
+            (isConnected ? (
               <Wifi className="h-4 w-4 text-green-400" />
             ) : (
               <WifiOff className="h-4 w-4 text-gray-500" />
-            )
-          )}
+            ))}
           <button
             type="button"
             onClick={() => setShowSettings(!showSettings)}
@@ -263,6 +288,17 @@ export function AiPanel() {
             }`}
           >
             LM Studio
+          </button>
+          <button
+            type="button"
+            onClick={() => setProvider("ollama")}
+            className={`flex-1 rounded py-2 text-sm font-medium ${
+              provider === "ollama"
+                ? "bg-purple-600 text-white"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
+          >
+            Ollama
           </button>
           <button
             type="button"
@@ -323,6 +359,48 @@ export function AiPanel() {
                 </div>
               )}
             </>
+          ) : provider === "ollama" ? (
+            <>
+              {/* Ollama URL */}
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Ollama URL (OpenAI-compatible)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={ollama.base_url}
+                    onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                    className="flex-1 rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                    placeholder="http://localhost:11434/v1"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => testConnectionMutation.mutate()}
+                    disabled={testConnectionMutation.isPending}
+                    className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-500 disabled:opacity-50"
+                  >
+                    {testConnectionMutation.isPending ? "..." : "Test"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Model selector */}
+              {availableModels.length > 0 && (
+                <div>
+                  <label className="mb-1 block text-xs text-gray-500">Model (e.g. llava, llava:13b)</label>
+                  <select
+                    value={ollama.model || ""}
+                    onChange={(e) => setOllamaModel(e.target.value || null)}
+                    className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  >
+                    {availableModels.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </>
           ) : (
             <>
               {/* JoyCaption Python Path */}
@@ -367,8 +445,8 @@ export function AiPanel() {
         </div>
       )}
 
-      {/* Prompt template selector (LM Studio only) */}
-      {provider === "lm_studio" && (
+      {/* Prompt template selector (LM Studio and Ollama) */}
+      {(provider === "lm_studio" || provider === "ollama") && (
         <div className="border-b border-border p-3">
           <label className="mb-1 block text-xs text-gray-500">Prompt Template</label>
           <select
@@ -392,7 +470,9 @@ export function AiPanel() {
       {/* Custom prompt input */}
       <div className="border-b border-border p-3">
         <label className="mb-1 block text-xs text-gray-500">
-          {provider === "lm_studio" ? "Custom Prompt" : "Custom Prompt (LM Studio only, JoyCaption uses mode)"}
+          {provider === "joycaption"
+            ? "Custom Prompt (LM Studio / Ollama only, JoyCaption uses mode)"
+            : "Custom Prompt"}
         </label>
         <textarea
           value={customPrompt}
@@ -415,7 +495,7 @@ export function AiPanel() {
           onClick={() => generateSingleMutation.mutate()}
           disabled={
             !selectedImage ||
-            (provider === "lm_studio" && !isConnected) ||
+            ((provider === "lm_studio" || provider === "ollama") && !isConnected) ||
             (provider === "joycaption" && !joyCaptionReady) ||
             generateSingleMutation.isPending
           }
@@ -429,30 +509,36 @@ export function AiPanel() {
           Generate Caption
         </button>
 
-        {/* Batch caption */}
-        <button
-          type="button"
-          onClick={handleBatchGenerate}
-          disabled={
-            batchTargetCount === 0 ||
-            (provider === "lm_studio" && !isConnected) ||
-            (provider === "joycaption" && !joyCaptionReady) ||
-            isGenerating
-          }
-          className="flex w-full items-center justify-center gap-2 rounded bg-gray-700 px-3 py-2 text-sm font-medium text-gray-200 hover:bg-gray-600 disabled:opacity-50"
-        >
-          {isGenerating ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
+        {/* Batch caption / Stop */}
+        {isGenerating ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleStopCaptioning}
+              className="flex flex-1 items-center justify-center gap-2 rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+            >
+              <Square className="h-4 w-4" />
+              Stop
+            </button>
+            <span className="flex items-center justify-center px-3 py-2 text-sm text-gray-400">
               {generationProgress.current}/{generationProgress.total}
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              Batch ({batchLabel})
-            </>
-          )}
-        </button>
+            </span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={handleBatchGenerate}
+            disabled={
+              batchTargetCount === 0 ||
+              ((provider === "lm_studio" || provider === "ollama") && !isConnected) ||
+              (provider === "joycaption" && !joyCaptionReady)
+            }
+            className="flex w-full items-center justify-center gap-2 rounded bg-gray-700 px-3 py-2 text-sm font-medium text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+          >
+            <Play className="h-4 w-4" />
+            Batch ({batchLabel})
+          </button>
+        )}
       </div>
 
       {/* Preview */}
@@ -486,6 +572,14 @@ export function AiPanel() {
         <div className="p-3 text-center">
           <p className="text-xs text-gray-500">
             Start LM Studio and load a vision model, then click Settings → Test
+          </p>
+        </div>
+      )}
+
+      {provider === "ollama" && !isConnected && (
+        <div className="p-3 text-center">
+          <p className="text-xs text-gray-500">
+            Start Ollama and pull a vision model (e.g. llava), then click Settings → Test
           </p>
         </div>
       )}

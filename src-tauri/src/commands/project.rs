@@ -1,3 +1,4 @@
+use image::ImageReader;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,6 +48,12 @@ pub struct ImageEntry {
     pub has_caption: bool,
     pub tags: Vec<String>,
     pub rating: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +123,16 @@ pub fn open_project(app: AppHandle, payload: OpenProjectPayload) -> Result<Vec<I
             .map(|s| ImageRating::from_str(s))
             .unwrap_or(ImageRating::None);
 
+        // Read image dimensions (header only, fast)
+        let (width, height) = ImageReader::open(&path_buf)
+            .ok()
+            .and_then(|r| r.into_dimensions().ok())
+            .unwrap_or((0u32, 0u32));
+        let width = if width > 0 { Some(width) } else { None };
+        let height = if height > 0 { Some(height) } else { None };
+
+        let file_size = fs::metadata(&path_buf).ok().map(|m| m.len()).filter(|&n| n > 0);
+
         entries.push(ImageEntry {
             id,
             path: path_str,
@@ -124,6 +141,9 @@ pub fn open_project(app: AppHandle, payload: OpenProjectPayload) -> Result<Vec<I
             has_caption,
             tags,
             rating: rating.as_str().to_string(),
+            width,
+            height,
+            file_size,
         });
 
         // Emit progress every 50 images

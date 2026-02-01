@@ -3,7 +3,9 @@ import { Toolbar } from "./components/layout/Toolbar";
 import { AppLayout } from "./components/layout/AppLayout";
 import { StatusBar } from "./components/layout/StatusBar";
 import { ImagePreviewModal } from "./components/preview/ImagePreviewModal";
+import { CropModal } from "./components/preview/CropModal";
 import { ProjectLoadOverlay } from "./components/project/ProjectLoadOverlay";
+import { RestorePreviousFolderPrompt } from "./components/project/RestorePreviousFolderPrompt";
 import { useUiStore } from "./stores/uiStore";
 
 function App() {
@@ -32,7 +34,9 @@ function App() {
 
       {/* Modals */}
       <ImagePreviewModal isOpen={isPreviewOpen} onClose={closePreview} />
+      <CropModal />
       <ProjectLoadOverlay />
+      <RestorePreviousFolderPrompt />
     </div>
   );
 }

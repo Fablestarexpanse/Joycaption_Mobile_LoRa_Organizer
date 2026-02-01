@@ -1,8 +1,12 @@
 import { useRef, useEffect, useCallback, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useProjectImages } from "@/hooks/useProject";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useFilterStore } from "@/stores/filterStore";
+import { useProjectStore } from "@/stores/projectStore";
+import { setImageRating } from "@/lib/tauri";
 import { ThumbnailCell } from "./ThumbnailCell";
+import type { ImageRating } from "@/types";
 
 const MIN_THUMB_SIZE = 200;
 const GAP = 12;
@@ -24,6 +28,25 @@ export function ImageGrid() {
   // Selection state
   const selectedImage = useSelectionStore((s) => s.selectedImage);
   const setSelectedImage = useSelectionStore((s) => s.setSelectedImage);
+  const rootPath = useProjectStore((s) => s.rootPath);
+  const queryClient = useQueryClient();
+
+  const invalidateProject = useCallback(() => {
+    if (rootPath) {
+      queryClient.invalidateQueries({ queryKey: ["project", "images", rootPath] });
+    }
+  }, [queryClient, rootPath]);
+
+  const ratingMutation = useMutation({
+    mutationFn: async ({
+      relative_path,
+      rating,
+    }: { relative_path: string; rating: ImageRating }) => {
+      if (!rootPath) throw new Error("No project open");
+      return setImageRating(rootPath, relative_path, rating);
+    },
+    onSuccess: invalidateProject,
+  });
 
   // Update column count based on container width
   useEffect(() => {
@@ -45,20 +68,20 @@ export function ImageGrid() {
   }, []);
 
   // Apply filters
-  const images = useMemo(() => {
-    let filtered = allImages;
+  const filtered = useMemo(() => {
+    let list = allImages;
 
     // Caption filter
     if (showCaptioned === true) {
-      filtered = filtered.filter((img) => img.has_caption);
+      list = list.filter((img) => img.has_caption);
     } else if (showCaptioned === false) {
-      filtered = filtered.filter((img) => !img.has_caption);
+      list = list.filter((img) => !img.has_caption);
     }
 
     // Tag filter
     if (tagFilter) {
       const lowerTag = tagFilter.toLowerCase();
-      filtered = filtered.filter((img) =>
+      list = list.filter((img) =>
         img.tags.some((t) => t.toLowerCase().includes(lowerTag))
       );
     }
@@ -66,7 +89,7 @@ export function ImageGrid() {
     // Text query filter
     if (query.trim()) {
       const lowerQuery = query.toLowerCase();
-      filtered = filtered.filter(
+      list = list.filter(
         (img) =>
           img.filename.toLowerCase().includes(lowerQuery) ||
           img.tags.some((t) => t.toLowerCase().includes(lowerQuery))
@@ -75,11 +98,39 @@ export function ImageGrid() {
 
     // Rating filter
     if (ratingFilter) {
-      filtered = filtered.filter((img) => img.rating === ratingFilter);
+      list = list.filter((img) => img.rating === ratingFilter);
     }
 
-    return filtered;
+    return list;
   }, [allImages, showCaptioned, tagFilter, query, ratingFilter]);
+
+  // Sort
+  const sortBy = useFilterStore((s) => s.sortBy);
+  const sortOrder = useFilterStore((s) => s.sortOrder);
+  const images = useMemo(() => {
+    const list = [...filtered];
+    const mult = sortOrder === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === "name") {
+        cmp = (a.filename ?? "").localeCompare(b.filename ?? "", undefined, { numeric: true });
+      } else if (sortBy === "file_size") {
+        const sa = a.file_size ?? 0;
+        const sb = b.file_size ?? 0;
+        cmp = sa < sb ? -1 : sa > sb ? 1 : 0;
+      } else if (sortBy === "dimension") {
+        const areaA = (a.width ?? 0) * (a.height ?? 0);
+        const areaB = (b.width ?? 0) * (b.height ?? 0);
+        cmp = areaA < areaB ? -1 : areaA > areaB ? 1 : 0;
+      } else {
+        const extA = (a.filename ?? "").split(".").pop() ?? "";
+        const extB = (b.filename ?? "").split(".").pop() ?? "";
+        cmp = extA.localeCompare(extB);
+      }
+      return mult * cmp;
+    });
+    return list;
+  }, [filtered, sortBy, sortOrder]);
 
   // Get current selected index
   const selectedIndex = useMemo(() => {
@@ -87,13 +138,32 @@ export function ImageGrid() {
     return images.findIndex((img) => img.id === selectedImage.id);
   }, [selectedImage, images]);
 
-  // Keyboard navigation
+  // Keyboard navigation and rating shortcuts
   const handleKeyNav = useCallback(
     (e: KeyboardEvent) => {
       if (
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA"
       ) {
+        return;
+      }
+
+      // Rating shortcuts: 1 = good, 2 = bad, 3 = needs_edit (ergonomic, left hand)
+      const ratingKey = e.key;
+      if (
+        (ratingKey === "1" || ratingKey === "2" || ratingKey === "3") &&
+        selectedImage &&
+        rootPath
+      ) {
+        const rating: ImageRating =
+          ratingKey === "1" ? "good" : ratingKey === "2" ? "bad" : "needs_edit";
+        e.preventDefault();
+        const currentRating = selectedImage.rating;
+        const newRating = currentRating === rating ? "none" : rating;
+        ratingMutation.mutate({
+          relative_path: selectedImage.relative_path,
+          rating: newRating as ImageRating,
+        });
         return;
       }
 
@@ -137,7 +207,15 @@ export function ImageGrid() {
           break;
       }
     },
-    [images, selectedIndex, setSelectedImage, columnCount]
+    [
+      images,
+      selectedIndex,
+      setSelectedImage,
+      columnCount,
+      selectedImage,
+      rootPath,
+      ratingMutation,
+    ]
   );
 
   useEffect(() => {

@@ -10,6 +10,7 @@ interface ProjectLoadProgressPayload {
 
 export function ProjectLoadOverlay() {
   const isLoadingProject = useProjectStore((s) => s.isLoadingProject);
+  const projectDataReady = useProjectStore((s) => s.projectDataReady);
   const imagesFound = useProjectLoadStore((s) => s.imagesFound);
   const setImagesFound = useProjectLoadStore((s) => s.setImagesFound);
   const reset = useProjectLoadStore((s) => s.reset);
@@ -52,14 +53,18 @@ export function ProjectLoadOverlay() {
             Loading project
           </h2>
           <p className="mt-2 text-sm text-gray-400">
-            Scanning folder for images…
+            {projectDataReady
+              ? "Loading thumbnails…"
+              : "Scanning folder for images…"}
           </p>
           <div className="mt-4 flex items-center justify-center gap-2">
             <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
             <span className="text-sm font-medium text-gray-300">
               {imagesFound > 0
                 ? `${imagesFound.toLocaleString()} image${imagesFound === 1 ? "" : "s"} found`
-                : "Scanning…"}
+                : projectDataReady
+                  ? "Preparing grid…"
+                  : "Scanning…"}
             </span>
           </div>
         </div>

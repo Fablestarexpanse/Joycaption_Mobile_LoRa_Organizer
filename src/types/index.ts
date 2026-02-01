@@ -10,6 +10,9 @@ export interface ImageEntry {
   has_caption: boolean;
   tags: string[];
   rating: ImageRating;
+  width?: number;
+  height?: number;
+  file_size?: number;
 }
 
 /** Caption data returned from read_caption. */
@@ -34,17 +37,24 @@ export interface ProjectSettings {
   triggerWord: string;
 }
 
+/** Sort field for image grid. */
+export type SortBy = "name" | "file_size" | "extension" | "dimension";
+/** Sort order. */
+export type SortOrder = "asc" | "desc";
+
 /** Filter state for the image grid. */
 export interface FilterState {
   query: string;
   showCaptioned: boolean | null; // null = all, true = captioned only, false = uncaptioned only
   tagFilter: string | null;
   ratingFilter: ImageRating | null; // null = all, or specific rating
+  sortBy: SortBy;
+  sortOrder: SortOrder;
 }
 
 // ============ AI Types ============
 
-export type AiProvider = "lm_studio" | "joycaption";
+export type AiProvider = "lm_studio" | "ollama" | "joycaption";
 
 /** LM Studio connection status. */
 export interface ConnectionStatus {
@@ -74,6 +84,12 @@ export interface LmStudioSettings {
   model: string | null;
 }
 
+/** Ollama settings (OpenAI-compatible API, e.g. http://localhost:11434/v1). */
+export interface OllamaSettings {
+  base_url: string;
+  model: string | null;
+}
+
 /** JoyCaption settings. */
 export interface JoyCaptionSettings {
   python_path: string;
@@ -97,8 +113,18 @@ export interface ExportOptions {
   dest_path: string;
   as_zip: boolean;
   only_captioned: boolean;
+  /** If set, only export these relative paths (e.g. only good-rated images). */
+  relative_paths?: string[] | null;
   trigger_word: string | null;
   sequential_naming: boolean;
+}
+
+/** Export into good/bad/needs_edit subfolders. */
+export interface ExportByRatingOptions {
+  source_path: string;
+  dest_path: string;
+  trigger_word?: string | null;
+  sequential_naming?: boolean;
 }
 
 /** Export result. */
@@ -108,6 +134,22 @@ export interface ExportResult {
   skipped_count: number;
   error: string | null;
   output_path: string;
+}
+
+/** Batch rename options. */
+export interface BatchRenameOptions {
+  root_path: string;
+  relative_paths: string[];
+  prefix: string;
+  start_index: number;
+  zero_pad: number;
+}
+
+/** Batch rename result. */
+export interface BatchRenameResult {
+  success: boolean;
+  renamed_count: number;
+  errors: string[];
 }
 
 export const DEFAULT_PROMPT_TEMPLATES: PromptTemplate[] = [
