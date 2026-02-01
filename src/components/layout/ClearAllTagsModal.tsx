@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Eraser, X, Loader2 } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useProjectImages } from "@/hooks/useProject";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { writeCaption } from "@/lib/tauri";
 
@@ -20,6 +21,7 @@ export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
   const rootPath = useProjectStore((s) => s.rootPath);
   const { data: images = [] } = useProjectImages();
   const queryClient = useQueryClient();
+  const setPreviousTriggerWord = useSettingsStore((s) => s.setPreviousTriggerWord);
 
   const clearAllMutation = useMutation({
     mutationFn: async () => {
@@ -31,6 +33,7 @@ export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
       if (rootPath) {
         queryClient.invalidateQueries({ queryKey: ["project", "images", rootPath] });
       }
+      setPreviousTriggerWord("");
       setConfirmText("");
       onClose();
     },

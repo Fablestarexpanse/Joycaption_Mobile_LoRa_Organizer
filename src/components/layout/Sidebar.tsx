@@ -21,7 +21,6 @@ export function Sidebar() {
 
   const [searchText, setSearchText] = useState("");
   const [replaceText, setReplaceText] = useState("");
-  const [useRegex, setUseRegex] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
   const triggerWord = useSettingsStore((s) => s.triggerWord);
   const setTriggerWord = useSettingsStore((s) => s.setTriggerWord);
@@ -41,6 +40,8 @@ export function Sidebar() {
     clearLastBatch,
     setSearchHighlightText,
     setAddTagPreview,
+    addTagRatingFilter,
+    setAddTagRatingFilter,
   } = useSearchReplaceStore();
 
   const invalidateProject = useCallback(() => {
@@ -67,19 +68,9 @@ export function Sidebar() {
       for (const img of targetImages) {
         const prevTags = img.tags;
         const newTags = prevTags.map((tag) => {
-          if (useRegex) {
-            try {
-              const re = new RegExp(search, "g");
-              return tag.replace(re, replaceStr);
-            } catch {
-              return tag;
-            }
-          } else {
-            // Plain text: escape regex special chars, case-insensitive replace
-            const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const re = new RegExp(escaped, "gi");
-            return tag.replace(re, replaceStr);
-          }
+          const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const re = new RegExp(escaped, "gi");
+          return tag.replace(re, replaceStr);
         });
 
         const changed = newTags.some((t, i) => t !== prevTags[i]);
@@ -197,9 +188,13 @@ export function Sidebar() {
     mutationFn: async () => {
       const tag = addTagToAllText.trim();
       if (!tag) return { applied: 0, total: images.length };
+      const targetImages =
+        addTagRatingFilter === "all"
+          ? images
+          : images.filter((img) => img.rating === addTagRatingFilter);
       const tw = triggerWord.trim();
       let applied = 0;
-      for (const img of images) {
+      for (const img of targetImages) {
         const tags = img.tags ?? [];
         const restWithoutTrigger = tw
           ? tags.filter((t) => t.trim().toLowerCase() !== tw.toLowerCase())
@@ -221,7 +216,7 @@ export function Sidebar() {
         await writeCaption(img.path, newTags);
         applied += 1;
       }
-      return { applied, total: images.length };
+      return { applied, total: targetImages.length };
     },
     onSuccess: (result) => {
       invalidateProject();
@@ -380,15 +375,6 @@ export function Sidebar() {
               <RotateCcw className="h-3 w-3" />
               Undo
             </button>
-            <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200">
-              <input
-                type="checkbox"
-                checked={useRegex}
-                onChange={(e) => setUseRegex(e.target.checked)}
-                className="rounded border-gray-600"
-              />
-              Regex
-            </label>
           </div>
           {lastResult && (
             <p className="text-xs text-gray-400">{lastResult}</p>
@@ -396,13 +382,29 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Add tag to all — live preview in image tag section */}
+      {/* Add tag — live preview, rating filter */}
       <div className="border-b border-border p-3">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-          Add tag to all
+          Add tag to
         </p>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {(["all", "good", "bad", "needs_edit"] as const).map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setAddTagRatingFilter(r)}
+              className={`rounded px-2 py-1 text-xs font-medium capitalize ${
+                addTagRatingFilter === r
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200"
+              }`}
+            >
+              {r === "all" ? "All" : r.replace("_", " ")}
+            </button>
+          ))}
+        </div>
         <p className="mb-2 text-[10px] text-gray-500">
-          As you type, the tag is previewed on each image. Apply to add at front or end of tags.
+          As you type, the tag is previewed. Apply to add at front or end of tags.
         </p>
         <div className="space-y-2">
           <input
@@ -441,7 +443,7 @@ export function Sidebar() {
             ) : (
               <Tag className="h-3 w-3 shrink-0" />
             )}
-            Apply to all
+            Apply
           </button>
         </div>
         {addTagResult && (

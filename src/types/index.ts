@@ -54,7 +54,7 @@ export interface FilterState {
 
 // ============ AI Types ============
 
-export type AiProvider = "lm_studio" | "ollama" | "joycaption" | "wd14" | "hybrid";
+export type AiProvider = "lm_studio" | "ollama";
 
 /** LM Studio connection status. */
 export interface ConnectionStatus {
@@ -88,20 +88,6 @@ export interface LmStudioSettings {
 export interface OllamaSettings {
   base_url: string;
   model: string | null;
-}
-
-/** WD14 Tagger settings (user-provided script). */
-export interface Wd14Settings {
-  python_path: string;
-  script_path: string | null;
-}
-
-/** JoyCaption settings. */
-export interface JoyCaptionSettings {
-  python_path: string;
-  script_path: string | null;
-  mode: string;
-  low_vram: boolean;
 }
 
 /** Prompt template. */

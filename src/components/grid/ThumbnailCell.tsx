@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Smile, Frown, Wrench, Loader2, Maximize2, Crop, Trash2, X, Eraser } from "lucide-react";
+import { Smile, Frown, Wrench, Loader2, Maximize2, Crop, Trash2, X, Eraser, Check } from "lucide-react";
 import {
   getThumbnailDataUrl,
   writeCaption,
@@ -126,6 +126,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
   const searchHighlightText = useSearchReplaceStore((s) => s.searchHighlightText);
   const addTagPreviewText = useSearchReplaceStore((s) => s.addTagPreviewText);
   const addTagPreviewAtFront = useSearchReplaceStore((s) => s.addTagPreviewAtFront);
+  const addTagRatingFilter = useSearchReplaceStore((s) => s.addTagRatingFilter);
   const triggerWord = useSettingsStore((s) => s.triggerWord);
   const confirmBeforeClearTags = useSettingsStore((s) => s.confirmBeforeClearTags);
 
@@ -162,8 +163,11 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
   });
 
   const displayText = tagsToText(entry.tags);
+  const showAddTagPreview =
+    addTagPreviewText.trim() !== "" &&
+    (addTagRatingFilter === "all" || entry.rating === addTagRatingFilter);
   const previewTags =
-    addTagPreviewText.trim() === ""
+    !showAddTagPreview
       ? entry.tags
       : addTagPreviewAtFront
         ? [addTagPreviewText.trim(), ...entry.tags]
@@ -618,7 +622,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
             }}
             className="min-h-[2.5rem] w-full cursor-text whitespace-pre-wrap break-words rounded border border-border bg-gray-800/80 px-2 py-1.5 text-xs leading-relaxed text-gray-200 hover:border-gray-600 focus:border-blue-500 focus:outline-none"
           >
-            {addTagPreviewText.trim() ? (
+            {showAddTagPreview ? (
               previewDisplayText ? (
                 highlightPreviewTag(previewDisplayText, addTagPreviewText.trim())
               ) : (

@@ -28,14 +28,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     ollama,
     setOllamaBaseUrl,
     setOllamaModel,
-    joyCaption,
-    setJoyCaptionPythonPath,
-    setJoyCaptionScriptPath,
-    setJoyCaptionMode,
-    setJoyCaptionLowVram,
-    wd14,
-    setWd14PythonPath,
-    setWd14ScriptPath,
   } = useAiStore();
 
   if (!isOpen) return null;
@@ -135,7 +127,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   className="rounded border-gray-600"
                 />
                 <span className="text-sm text-gray-300">
-                  Preview AI caption before saving (grid Generate)
+                  Preview AI caption before saving
                 </span>
               </label>
               <p className="text-xs text-gray-500">
@@ -197,82 +189,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   value={ollama.model ?? ""}
                   onChange={(e) => setOllamaModel(e.target.value || null)}
                   placeholder="e.g. llava"
-                  className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200 placeholder-gray-500"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm text-gray-300">
-                  JoyCaption Python Path
-                </label>
-                <input
-                  type="text"
-                  value={joyCaption.python_path}
-                  onChange={(e) => setJoyCaptionPythonPath(e.target.value)}
-                  placeholder="python"
-                  className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200 placeholder-gray-500"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-gray-300">
-                  JoyCaption Script Path (optional)
-                </label>
-                <input
-                  type="text"
-                  value={joyCaption.script_path ?? ""}
-                  onChange={(e) => setJoyCaptionScriptPath(e.target.value || null)}
-                  placeholder="Path to joycaption inference script"
-                  className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200 placeholder-gray-500"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-gray-300">
-                  JoyCaption Mode
-                </label>
-                <select
-                  value={joyCaption.mode}
-                  onChange={(e) => setJoyCaptionMode(e.target.value)}
-                  className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200"
-                >
-                  <option value="descriptive">Descriptive</option>
-                  <option value="straightforward">Straightforward</option>
-                  <option value="booru">Booru Tags</option>
-                  <option value="training">Training Caption</option>
-                </select>
-              </div>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={joyCaption.low_vram}
-                  onChange={(e) => setJoyCaptionLowVram(e.target.checked)}
-                  className="rounded border-gray-600"
-                />
-                <span className="text-sm text-gray-300">
-                  JoyCaption low VRAM mode
-                </span>
-              </label>
-
-              <div>
-                <label className="mb-1 block text-sm text-gray-300">
-                  WD14 Python Path
-                </label>
-                <input
-                  type="text"
-                  value={wd14.python_path}
-                  onChange={(e) => setWd14PythonPath(e.target.value)}
-                  placeholder="python"
-                  className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200 placeholder-gray-500"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-gray-300">
-                  WD14 Script Path (optional)
-                </label>
-                <input
-                  type="text"
-                  value={wd14.script_path ?? ""}
-                  onChange={(e) => setWd14ScriptPath(e.target.value || null)}
-                  placeholder="Path to WD14 tagger script"
                   className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200 placeholder-gray-500"
                 />
               </div>

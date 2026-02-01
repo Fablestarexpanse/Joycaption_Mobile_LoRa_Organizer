@@ -26,10 +26,10 @@ A modern, cross-platform desktop application for preparing image datasets for AI
 - **Copy Caption** — Copy caption from previous or next image (Copy prev / Copy next buttons)
 - **Tag Weighting** — Apply `(tag:1.2)` style weights
 - **Right Panel Editor** — Tag list with drag-to-reorder and quick delete
-- **Search & Replace** — Find and replace across all tags with regex support
+- **Search & Replace** — Find and replace across all tags (case-insensitive)
 - **Live Highlighting** — Matches highlighted as you type
 - **Trigger Word** — Set a trigger word; kept first in all tags, with optional lock
-- **Add Tag to All** — Add a tag to every image (front or end), with live preview
+- **Add Tag To** — Add a tag to All, Good, Bad, or Needs Edit rated images (front or end), with live preview
 - **Clear Tags** — Per-image "clear all tags" (with optional confirm) and toolbar "Clear All Tags" (type "delete" to confirm)
 - **Auto-Save** — Changes saved to `.txt` caption files
 - **Undo/Redo** — Ctrl+Z / Ctrl+Y for tag changes
@@ -37,10 +37,7 @@ A modern, cross-platform desktop application for preparing image datasets for AI
 ### AI Captioning
 - **LM Studio** — Connect to local LM Studio; any vision model; custom prompts and templates. See [LM Studio Setup Guide](docs/LM_STUDIO_SETUP.md) for detailed setup and usage.
 - **Ollama** — Same OpenAI-compatible API; use `llava` or other vision models locally
-- **JoyCaption** — One-click installer; LLaVA-based model; install/uninstall; modes: Descriptive, Booru, Training
-- **WD14** — Danbooru-style tags via a user-provided Python script (`--image` + stdout tags)
-- **Hybrid** — WD14 tags + JoyCaption description merged
-- **Batch** — One model load per batch for JoyCaption; parallel requests for LM Studio/Ollama; rating filter (All / Good / Bad / Needs Edit)
+- **Batch** — Parallel requests; rating filter (All / Good / Bad / Needs Edit)
 - **Stop** — Cancel batch captioning mid-run
 - **Generate Caption** — Single image from AI panel; preview before save option
 - **Resource Monitor** — CPU, memory, and GPU stats always shown at top
@@ -76,15 +73,14 @@ A modern, cross-platform desktop application for preparing image datasets for AI
   - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
   - **Linux:** See [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux)
 
-For JoyCaption: Python 3.10+ (auto-installer available in the app). CUDA GPU recommended for faster captioning.
 
 ## Installation
 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Fablestarexpanse/Joycaption_Mobile_LoRa_Organizer.git
-cd Joycaption_Mobile_LoRa_Organizer
+git clone https://github.com/Fablestarexpanse/Promptwaffle_LoRa_Organizer_Tagger.git
+cd Promptwaffle_LoRa_Organizer_Tagger
 ```
 
 ### 2. Install dependencies
@@ -152,8 +148,7 @@ Installers will be created in `src-tauri/target/release/bundle/` for your platfo
 │   ├── lib/             # Tauri API (tauri.ts)
 │   └── types/           # TypeScript types
 ├── src-tauri/
-│   ├── src/commands/    # Rust: captions, images, lm_studio, ollama, joycaption, export, …
-│   └── resources/       # joycaption_inference.py
+│   └── src/commands/    # Rust: captions, images, lm_studio, ollama, export, …
 └── docs/               # LM_STUDIO_SETUP.md, archive/
 ```
 
@@ -181,21 +176,6 @@ See **[LM Studio Setup Guide](docs/LM_STUDIO_SETUP.md)** for full setup instruct
 2. Pull a vision model: `ollama pull llava` (or another vision model)
 3. In the app: **AI provider → Ollama → Settings → Test** (default: http://localhost:11434/v1) → pick model → **Generate**
 
-### JoyCaption
-1. In the app: **AI provider → JoyCaption → Install JoyCaption** (one-click venv + model download)
-2. Choose mode (Descriptive, Booru, Training) → **Generate Caption** or **Batch**
-3. Use **Uninstall** if needed; reinstall to update the inference script
-
-### WD14
-1. Obtain a WD14 tagger script that accepts `--image <path>` and prints comma-separated tags to stdout
-   - Example: [wd14-tagger-standalone](https://github.com/toriato/wd14-tagger-standalone) or scripts from [kohya_ss](https://github.com/kohya-ss/sd-scripts)
-2. In the app: **AI provider → WD14 → Settings** → set Python path and script path → **Generate** or **Batch**
-
-### Hybrid (WD14 + JoyCaption)
-1. Set up both WD14 script and JoyCaption (as above)
-2. In the app: **AI provider → Hybrid → Settings** → configure WD14 script path and JoyCaption Python/script/mode → **Generate** or **Batch**
-3. Output is WD14 tags plus JoyCaption description merged
-
 ### Preview before save
 Go to **Settings → General → Preview AI caption before saving**. When enabled, Generate Caption shows a preview so you can Accept or Reject before overwriting.
 
@@ -210,5 +190,4 @@ MIT — see [LICENSE](LICENSE).
 ## Acknowledgments
 
 - [Tauri](https://tauri.app/) for the desktop framework
-- [JoyCaption](https://huggingface.co/John6666/llama-joycaption-beta-one-hf-llava-nf4) for the captioning model
 - The LoRA and diffusion training community

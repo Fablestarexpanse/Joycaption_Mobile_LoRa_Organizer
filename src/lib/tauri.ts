@@ -198,56 +198,6 @@ export async function generateCaptionsBatch(
   });
 }
 
-export async function generateCaptionJoyCaption(
-  imagePath: string,
-  pythonPath: string,
-  scriptPath: string | null,
-  mode: string,
-  lowVram: boolean
-): Promise<CaptionResult> {
-  return invoke<CaptionResult>("generate_caption_joycaption", {
-    payload: {
-      image_path: imagePath,
-      python_path: pythonPath,
-      script_path: scriptPath,
-      mode,
-      low_vram: lowVram,
-    },
-  });
-}
-
-export async function generateCaptionsJoyCaptionBatch(
-  imagePaths: string[],
-  pythonPath: string,
-  scriptPath: string | null,
-  mode: string,
-  lowVram: boolean
-): Promise<BatchCaptionResult[]> {
-  return invoke<BatchCaptionResult[]>("generate_captions_joycaption_batch", {
-    payload: {
-      image_paths: imagePaths,
-      python_path: pythonPath,
-      script_path: scriptPath,
-      mode,
-      low_vram: lowVram,
-    },
-  });
-}
-
-export async function generateCaptionWd14(
-  imagePath: string,
-  pythonPath: string,
-  scriptPath: string | null
-): Promise<CaptionResult> {
-  return invoke<CaptionResult>("generate_caption_wd14", {
-    payload: {
-      image_path: imagePath,
-      python_path: pythonPath,
-      script_path: scriptPath,
-    },
-  });
-}
-
 // ============ Export Functions ============
 
 export async function exportDataset(
@@ -323,54 +273,7 @@ export async function batchRename(
   });
 }
 
-// ============ JoyCaption Installer ============
-
-export interface JoyCaptionInstallStatus {
-  installed: boolean;
-  python_path: string | null;
-  script_path: string | null;
-  error: string | null;
-}
-
-export interface JoyCaptionInstallProgress {
-  stage: string;
-  message: string;
-  percent: number;
-}
-
-export interface JoyCaptionInstallResult {
-  success: boolean;
-  python_path: string | null;
-  script_path: string | null;
-  error: string | null;
-}
-
-export async function joycaptionInstallStatus(): Promise<JoyCaptionInstallStatus> {
-  return invoke<JoyCaptionInstallStatus>("joycaption_install_status");
-}
-
-export async function joycaptionInstall(): Promise<JoyCaptionInstallResult> {
-  return invoke<JoyCaptionInstallResult>("joycaption_install");
-}
-
-export interface JoyCaptionUninstallResult {
-  success: boolean;
-  message: string;
-}
-
-export async function joycaptionUninstall(): Promise<JoyCaptionUninstallResult> {
-  return invoke<JoyCaptionUninstallResult>("joycaption_uninstall");
-}
-
-export interface JoyCaptionDiagnoseResult {
-  ok: boolean;
-  python_exists: boolean;
-  script_exists: boolean;
-  stdout: string;
-  stderr: string;
-  exit_code: number | null;
-  error: string | null;
-}
+// ============ Resource Monitor ============
 
 export interface ResourceStats {
   cpu: { name: string; usage_percent: number };
@@ -391,13 +294,4 @@ export interface ResourceStats {
 
 export async function getResourceStats(): Promise<ResourceStats> {
   return invoke<ResourceStats>("get_resource_stats");
-}
-
-export async function joycaptionDiagnose(
-  pythonPath: string,
-  scriptPath: string
-): Promise<JoyCaptionDiagnoseResult> {
-  return invoke<JoyCaptionDiagnoseResult>("joycaption_diagnose", {
-    payload: { python_path: pythonPath, script_path: scriptPath },
-  });
 }
