@@ -20,6 +20,7 @@ interface SettingsState {
   setAutoSelectFirst: (value: boolean) => void;
   setConfirmBeforeClearTags: (value: boolean) => void;
   setPreviewBeforeSaveCaption: (value: boolean) => void;
+  setAiToolkitPath: (path: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(

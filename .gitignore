@@ -4,6 +4,9 @@ node_modules/
 # Build outputs
 dist/
 src-tauri/target/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
 
 # IDE
 .idea/
@@ -36,7 +39,7 @@ src-tauri/gen/
 # Project local data (user's dataset metadata)
 .lora-studio/
 
-# Python (for JoyCaption venv if created locally)
+# Python / venv
 __pycache__/
 *.py[cod]
 .venv/

@@ -22,6 +22,8 @@ import {
   generateCaptionsBatch,
   writeCaption,
 } from "@/lib/tauri";
+import { buildEffectivePrompt } from "@/lib/promptBuilder";
+import { DEFAULT_EXTRA_OPTIONS } from "@/types";
 
 export function AiPanel() {
   const [previewCaption, setPreviewCaption] = useState<string | null>(null);
@@ -37,6 +39,14 @@ export function AiPanel() {
     setProvider,
     customPrompt,
     setCustomPrompt,
+    wordCount,
+    length,
+    characterName,
+    extraOptionIds,
+    setWordCount,
+    setLength,
+    setCharacterName,
+    toggleExtraOption,
     lmStudio,
     setLmStudioUrl,
     setLmStudioModel,
@@ -64,7 +74,14 @@ export function AiPanel() {
 
   const selectedTemplate = promptTemplates.find((t) => t.id === selectedTemplateId);
 
-  const effectivePrompt = customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.";
+  const basePrompt =
+    customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.";
+  const effectivePrompt = buildEffectivePrompt(basePrompt, {
+    wordCount,
+    length,
+    characterName,
+    extraOptionIds,
+  });
 
   const testConnectionMutation = useMutation({
     mutationFn: () =>
@@ -388,6 +405,74 @@ export function AiPanel() {
         />
       </div>
 
+      {/* Word limit and character name */}
+      <div className="border-b border-border p-3">
+        <div className="grid gap-4 items-end sm:grid-cols-[auto_1fr]">
+          <div className="w-20 shrink-0">
+            <label className="mb-1 block text-xs text-gray-500">Word limit</label>
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={wordCount ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                setWordCount(v === "" ? null : Math.max(1, Math.min(500, Number(v) || 0)));
+              }}
+              placeholder="—"
+              title="Optional word limit"
+              className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200 placeholder-gray-500"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="mb-1 block text-xs text-gray-500">
+              Character name <span className="whitespace-nowrap">(for {`{name}`})</span>
+            </label>
+            <input
+              type="text"
+              value={characterName}
+              onChange={(e) => setCharacterName(e.target.value)}
+              placeholder="—"
+              title="Optional; used in prompt"
+              className="w-full min-w-0 rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200 placeholder-gray-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Extra options */}
+      <div className="border-b border-border p-3">
+        <label className="mb-1 block text-xs text-gray-500">Extra options</label>
+        <div className="max-h-40 overflow-y-auto overflow-x-hidden rounded border border-border bg-surface/50 p-2 pr-3">
+          <div className="grid grid-cols-1 gap-y-1.5 sm:grid-cols-2">
+            {DEFAULT_EXTRA_OPTIONS.map((opt) => (
+              <label
+                key={opt.id}
+                className="flex cursor-pointer items-start gap-2 text-xs text-gray-300 hover:text-gray-200"
+              >
+                <input
+                  type="checkbox"
+                  checked={extraOptionIds.includes(opt.id)}
+                  onChange={() => toggleExtraOption(opt.id)}
+                  className="mt-0.5 shrink-0 rounded border-gray-600"
+                />
+                <span className="break-words" title={opt.label}>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Prompt used (read-only) */}
+      <details className="border-b border-border group">
+        <summary className="cursor-pointer px-3 py-2 text-xs text-gray-500 hover:text-gray-400">
+          Prompt used
+        </summary>
+        <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words border-t border-border bg-surface/50 px-3 py-2 text-[10px] text-gray-400">
+          {effectivePrompt}
+        </pre>
+      </details>
+
       {/* Batch captioning: rating filter */}
       <div className="border-b border-border p-3">
         <label className="mb-1 block text-xs text-gray-500">
@@ -425,31 +510,13 @@ export function AiPanel() {
             </label>
           ))}
         </div>
-        <p className="mt-1 text-[10px] text-gray-500">
+        <p className="mt-2 text-[10px] leading-relaxed text-gray-500">
           All = every image in project (re-caption). Otherwise: selected/uncaptioned + rating.
         </p>
       </div>
 
       {/* Actions */}
       <div className="space-y-2 p-3">
-        <button
-          type="button"
-          onClick={() => generateSingleMutation.mutate()}
-          disabled={
-            !selectedImage ||
-            !isConnected ||
-            generateSingleMutation.isPending
-          }
-          className="flex w-full items-center justify-center gap-2 rounded bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
-        >
-          {generateSingleMutation.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
-          Generate Caption
-        </button>
-
         {isGenerating ? (
           <div className="space-y-2">
             <div className="flex gap-2">

@@ -80,7 +80,7 @@ pub fn open_project(app: AppHandle, payload: OpenProjectPayload) -> Result<Vec<I
     let ratings_data = load_ratings(&payload.root_path);
     let mut entries = Vec::new();
 
-    for entry in WalkDir::new(&root)
+    for entry in WalkDir::new(&canonical_root)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -96,7 +96,7 @@ pub fn open_project(app: AppHandle, payload: OpenProjectPayload) -> Result<Vec<I
             .to_string();
         let relative = path_buf
             .strip_prefix(&canonical_root)
-            .unwrap_or(&path_buf);
+            .unwrap_or_else(|_| path_buf.as_path());
         let relative_path = relative
             .to_str()
             .ok_or("Invalid path encoding")?

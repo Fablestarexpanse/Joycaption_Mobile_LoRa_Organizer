@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { X, Keyboard } from "lucide-react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface HelpModalProps {
   isOpen: boolean;
@@ -22,11 +24,16 @@ const shortcuts = [
 ];
 
 export function HelpModal({ isOpen, onClose }: HelpModalProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(contentRef, isOpen);
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="w-full max-w-md rounded-lg border border-border bg-surface-elevated shadow-xl">
+      <div
+        ref={contentRef}
+        className="w-full max-w-md rounded-lg border border-border bg-surface-elevated shadow-xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="flex items-center gap-2 text-lg font-medium text-gray-100">

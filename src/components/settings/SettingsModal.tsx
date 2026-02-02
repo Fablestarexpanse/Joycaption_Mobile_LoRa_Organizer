@@ -1,6 +1,8 @@
+import { useRef } from "react";
 import { X, Settings } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useAiStore } from "@/stores/aiStore";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -34,7 +36,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="w-full max-w-lg rounded-lg border border-border bg-surface-elevated shadow-xl">
+      <div
+        ref={contentRef}
+        className="w-full max-w-lg rounded-lg border border-border bg-surface-elevated shadow-xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="flex items-center gap-2 text-lg font-medium text-gray-100">

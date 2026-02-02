@@ -1,76 +1,43 @@
+//! Export dataset: copy images + .txt captions to a folder or ZIP.
+//! Supports filtering by relative paths and "only captioned"; optional trigger word and sequential naming.
+
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use super::ratings::{load_ratings, ImageRating};
+use super::ratings::{load_ratings, ImageRating, RatingsData};
 
-/// Normalize path for comparison (forward slashes, lowercase on Windows for extension)
-fn relative_path_str(path: &Path, source: &Path) -> Option<String> {
-    path.strip_prefix(source)
-        .ok()
-        .and_then(|p| p.to_str())
-        .map(|s| s.replace('\\', "/"))
+const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+
+fn is_image(p: &Path) -> bool {
+    let ext = match p.extension().and_then(|e| e.to_str()) {
+        Some(e) => e.to_lowercase(),
+        None => return false,
+    };
+    IMAGE_EXT.iter().any(|&e| e.eq_ignore_ascii_case(&ext))
 }
 
-const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp"];
-
-fn is_image_path(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
-    ext.as_ref()
-        .map(|e| IMAGE_EXTENSIONS.contains(&e.as_str()))
-        .unwrap_or(false)
+fn caption_path(img: &Path) -> PathBuf {
+    img.with_extension("txt")
 }
 
-fn caption_path_for(image_path: &Path) -> PathBuf {
-    image_path.with_extension("txt")
-}
-
-#[allow(dead_code)]
-fn parse_tags(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
+// ============ Export to folder or ZIP ============
 
 #[derive(Debug, Deserialize)]
 pub struct ExportOptions {
-    /// Source folder to export from
     pub source_path: String,
-    /// Destination folder or ZIP path
     pub dest_path: String,
-    /// Export as ZIP
     #[serde(default)]
     pub as_zip: bool,
-    /// Only export captioned images
     #[serde(default)]
     pub only_captioned: bool,
-    /// If set, only export these relative paths (e.g. for "only good" export)
     #[serde(default)]
     pub relative_paths: Option<Vec<String>>,
-    /// Trigger word to prepend to captions
     #[serde(default)]
     pub trigger_word: Option<String>,
-    /// Use sequential naming (001.png, 002.png, etc.)
     #[serde(default)]
     pub sequential_naming: bool,
-    /// "txt" = comma-separated .txt per image; "metadata" = Kohya metadata.json
-    #[serde(default)]
-    pub caption_format: Option<String>,
-    /// Kohya folder structure: N_conceptname (e.g. 10_mycharacter)
-    #[serde(default)]
-    pub kohya_folder: Option<KohyaFolderOptions>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct KohyaFolderOptions {
-    pub repeat_count: u32,
-    pub concept_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,199 +49,102 @@ pub struct ExportResult {
     pub output_path: String,
 }
 
-/// Export dataset to folder or ZIP
+/// Normalize relative path: forward slashes, trim leading slashes.
+fn normalize_rel(s: &str) -> String {
+    s.replace('\\', "/").trim_start_matches(|c| c == '/' || c == '\\').to_string()
+}
+
+/// Normalize for case-insensitive path comparison (e.g. Windows).
+fn normalize_key_for_lookup(s: &str) -> String {
+    normalize_rel(s).to_lowercase()
+}
+
 #[tauri::command]
 pub async fn export_dataset(options: ExportOptions) -> Result<ExportResult, String> {
     let source = PathBuf::from(&options.source_path);
-    if !source.exists() || !source.is_dir() {
+    if !source.is_dir() {
         return Err("Source folder does not exist".to_string());
     }
+    let canonical_source = source.canonicalize().map_err(|e| e.to_string())?;
 
-    // Optional whitelist of relative paths (e.g. only good-rated images)
-    let path_set: Option<std::collections::HashSet<String>> = options
-        .relative_paths
-        .as_ref()
-        .map(|v| v.iter().map(|s| s.replace('\\', "/")).collect());
-
-    // Collect images to export
     let mut images: Vec<PathBuf> = Vec::new();
-    for entry in WalkDir::new(&source)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || !is_image_path(path) {
-            continue;
-        }
 
-        if let Some(ref set) = path_set {
-            let rel = match relative_path_str(path, &source) {
-                Some(r) => r,
-                None => continue,
-            };
-            if !set.contains(&rel) {
+    if let Some(ref relative_paths) = options.relative_paths {
+        // Use frontend paths directly: join each to canonical source and add if file exists
+        for rel in relative_paths {
+            let normalized = normalize_rel(rel);
+            if normalized.is_empty() {
                 continue;
             }
-        }
-
-        if options.only_captioned {
-            let caption_path = caption_path_for(path);
-            if !caption_path.exists() {
-                continue;
+            let full = canonical_source.join(&normalized);
+            if full.is_file() && is_image(&full) {
+                if options.only_captioned && !caption_path(&full).exists() {
+                    continue;
+                }
+                images.push(full);
             }
         }
-
-        images.push(path.to_path_buf());
+    } else {
+        // No filter: walk entire source and add all (subject to only_captioned)
+        for entry in WalkDir::new(&canonical_source).follow_links(false).into_iter().filter_map(Result::ok) {
+            let p = entry.path();
+            if !p.is_file() || !is_image(p) {
+                continue;
+            }
+            if options.only_captioned && !caption_path(p).exists() {
+                continue;
+            }
+            images.push(p.to_path_buf());
+        }
     }
 
     images.sort();
 
-    let use_metadata = options.caption_format.as_deref() == Some("metadata");
-
     if options.as_zip {
-        if use_metadata {
-            Err("ZIP + metadata.json format not supported; use folder export".to_string())
-        } else if options.kohya_folder.is_some() {
-            Err("Kohya folder structure requires folder export, not ZIP".to_string())
-        } else {
-            export_as_zip(&images, &options)
-        }
-    } else if use_metadata {
-        export_to_folder_metadata(&images, &options)
+        export_zip(&images, &options)
     } else {
-        export_to_folder(&images, &options)
+        export_folder(&images, &options)
     }
 }
 
-fn export_to_folder_metadata(
-    images: &[PathBuf],
-    options: &ExportOptions,
-) -> Result<ExportResult, String> {
-    let dest = PathBuf::from(&options.dest_path);
+fn apply_trigger(content: &str, trigger: Option<&String>) -> String {
+    let content = content.trim();
+    match trigger {
+        Some(t) if !t.is_empty() => format!("{}, {}", t.trim(), content),
+        _ => content.to_string(),
+    }
+}
+
+fn export_folder(images: &[PathBuf], opt: &ExportOptions) -> Result<ExportResult, String> {
+    let dest = PathBuf::from(&opt.dest_path);
     fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
 
-    let mut metadata: HashMap<String, String> = HashMap::new();
-    let mut exported = 0;
-    let mut skipped = 0;
+    let mut exported = 0usize;
+    let mut skipped = 0usize;
 
-    for (i, img_path) in images.iter().enumerate() {
-        let ext = img_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("png");
-
-        let new_name = if options.sequential_naming {
+    for (i, img) in images.iter().enumerate() {
+        let ext = img.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let name = if opt.sequential_naming {
             format!("{:04}.{}", i + 1, ext)
         } else {
-            img_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("image.png")
-                .to_string()
+            img.file_name().and_then(|n| n.to_str()).unwrap_or("image.png").to_string()
         };
 
-        let dest_img = dest.join(&new_name);
-
-        if fs::copy(img_path, &dest_img).is_err() {
+        let dest_img = dest.join(&name);
+        if fs::copy(img, &dest_img).is_err() {
             skipped += 1;
             continue;
         }
 
-        let caption_path = caption_path_for(img_path);
-        let caption_text = if caption_path.exists() {
-            if let Ok(content) = fs::read_to_string(&caption_path) {
-                let base = content.trim();
-                if let Some(ref trigger) = options.trigger_word {
-                    if !trigger.is_empty() {
-                        format!("{}, {}", trigger.trim(), base)
-                    } else {
-                        base.to_string()
-                    }
-                } else {
-                    base.to_string()
-                }
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-
-        metadata.insert(new_name, caption_text);
-        exported += 1;
-    }
-
-    let metadata_path = dest.join("metadata.json");
-    let json = serde_json::to_string_pretty(&metadata).map_err(|e| e.to_string())?;
-    fs::write(&metadata_path, json).map_err(|e| e.to_string())?;
-
-    Ok(ExportResult {
-        success: true,
-        exported_count: exported,
-        skipped_count: skipped,
-        error: None,
-        output_path: options.dest_path.clone(),
-    })
-}
-
-fn export_to_folder(images: &[PathBuf], options: &ExportOptions) -> Result<ExportResult, String> {
-    let mut dest = PathBuf::from(&options.dest_path);
-    if let Some(ref kf) = options.kohya_folder {
-        let name = kf.concept_name.replace(['/', '\\'], "_").trim().to_string();
-        let name = if name.is_empty() { "concept".to_string() } else { name };
-        dest = dest.join(format!("{}_{}", kf.repeat_count, name));
-    }
-    fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-
-    let mut exported = 0;
-    let mut skipped = 0;
-
-    for (i, img_path) in images.iter().enumerate() {
-        let ext = img_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("png");
-
-        let new_name = if options.sequential_naming {
-            format!("{:04}.{}", i + 1, ext)
-        } else {
-            img_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("image.png")
-                .to_string()
-        };
-
-        let dest_img = dest.join(&new_name);
-        let dest_txt = dest.join(format!(
-            "{}.txt",
-            new_name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&new_name)
-        ));
-
-        // Copy image
-        if let Err(_e) = fs::copy(img_path, &dest_img) {
-            skipped += 1;
-            continue;
-        }
-
-        // Copy/modify caption
-        let caption_path = caption_path_for(img_path);
-        if caption_path.exists() {
-            if let Ok(content) = fs::read_to_string(&caption_path) {
-                let final_content = if let Some(ref trigger) = options.trigger_word {
-                    if !trigger.is_empty() {
-                        format!("{}, {}", trigger.trim(), content.trim())
-                    } else {
-                        content.trim().to_string()
-                    }
-                } else {
-                    content.trim().to_string()
-                };
-                let _ = fs::write(&dest_txt, final_content);
+        let base = name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&name);
+        let dest_txt = dest.join(format!("{}.txt", base));
+        let cap_src = caption_path(img);
+        if cap_src.exists() {
+            if let Ok(content) = fs::read_to_string(&cap_src) {
+                let out = apply_trigger(&content, opt.trigger_word.as_ref());
+                let _ = fs::write(&dest_txt, out);
             }
         }
-
         exported += 1;
     }
 
@@ -283,80 +153,49 @@ fn export_to_folder(images: &[PathBuf], options: &ExportOptions) -> Result<Expor
         exported_count: exported,
         skipped_count: skipped,
         error: None,
-        output_path: options.dest_path.clone(),
+        output_path: opt.dest_path.clone(),
     })
 }
 
-fn export_as_zip(images: &[PathBuf], options: &ExportOptions) -> Result<ExportResult, String> {
+fn export_zip(images: &[PathBuf], opt: &ExportOptions) -> Result<ExportResult, String> {
     use std::io::Write;
 
-    let dest_path = PathBuf::from(&options.dest_path);
-
-    // Create ZIP file
-    let file = fs::File::create(&dest_path).map_err(|e| e.to_string())?;
+    let file = fs::File::create(&opt.dest_path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
-
-    let zip_options = zip::write::SimpleFileOptions::default()
+    let opts = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
 
-    let mut exported = 0;
-    let mut skipped = 0;
+    let mut exported = 0usize;
+    let mut skipped = 0usize;
 
-    for (i, img_path) in images.iter().enumerate() {
-        let ext = img_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("png");
-
-        let new_name = if options.sequential_naming {
+    for (i, img) in images.iter().enumerate() {
+        let ext = img.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let name = if opt.sequential_naming {
             format!("{:04}.{}", i + 1, ext)
         } else {
-            img_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("image.png")
-                .to_string()
+            img.file_name().and_then(|n| n.to_str()).unwrap_or("image.png").to_string()
         };
 
-        let txt_name = format!(
-            "{}.txt",
-            new_name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&new_name)
-        );
-
-        // Add image to ZIP
-        let img_data = match fs::read(img_path) {
-            Ok(data) => data,
+        let data = match fs::read(img) {
+            Ok(d) => d,
             Err(_) => {
                 skipped += 1;
                 continue;
             }
         };
+        zip.start_file(&name, opts).map_err(|e| e.to_string())?;
+        zip.write_all(&data).map_err(|e| e.to_string())?;
 
-        zip.start_file(&new_name, zip_options)
-            .map_err(|e| e.to_string())?;
-        zip.write_all(&img_data).map_err(|e| e.to_string())?;
-
-        // Add caption to ZIP
-        let caption_path = caption_path_for(img_path);
-        if caption_path.exists() {
-            if let Ok(content) = fs::read_to_string(&caption_path) {
-                let final_content = if let Some(ref trigger) = options.trigger_word {
-                    if !trigger.is_empty() {
-                        format!("{}, {}", trigger.trim(), content.trim())
-                    } else {
-                        content.trim().to_string()
-                    }
-                } else {
-                    content.trim().to_string()
-                };
-
-                zip.start_file(&txt_name, zip_options)
-                    .map_err(|e| e.to_string())?;
-                zip.write_all(final_content.as_bytes())
-                    .map_err(|e| e.to_string())?;
+        let base = name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&name);
+        let txt_name = format!("{}.txt", base);
+        let cap_src = caption_path(img);
+        if cap_src.exists() {
+            if let Ok(content) = fs::read_to_string(&cap_src) {
+                let out = apply_trigger(&content, opt.trigger_word.as_ref());
+                zip.start_file(&txt_name, opts).map_err(|e| e.to_string())?;
+                zip.write_all(out.as_bytes()).map_err(|e| e.to_string())?;
             }
         }
-
         exported += 1;
     }
 
@@ -367,7 +206,7 @@ fn export_as_zip(images: &[PathBuf], options: &ExportOptions) -> Result<ExportRe
         exported_count: exported,
         skipped_count: skipped,
         error: None,
-        output_path: options.dest_path.clone(),
+        output_path: opt.dest_path.clone(),
     })
 }
 
@@ -376,7 +215,6 @@ fn export_as_zip(images: &[PathBuf], options: &ExportOptions) -> Result<ExportRe
 #[derive(Debug, Deserialize)]
 pub struct ExportByRatingOptions {
     pub source_path: String,
-    /// Parent folder; creates good/, bad/, needs_edit/ inside
     pub dest_path: String,
     #[serde(default)]
     pub trigger_word: Option<String>,
@@ -384,128 +222,131 @@ pub struct ExportByRatingOptions {
     pub sequential_naming: bool,
 }
 
-/// Export images into subfolders by rating: dest/good, dest/bad, dest/needs_edit
+fn rating_key(r: ImageRating) -> Option<&'static str> {
+    match r {
+        ImageRating::Good => Some("good"),
+        ImageRating::Bad => Some("bad"),
+        ImageRating::NeedsEdit => Some("needs_edit"),
+        ImageRating::None => None,
+    }
+}
+
+/// Look up rating for a relative path: try exact key, case-insensitive, then key as absolute path (strip project root).
+fn get_rating_for_path(
+    ratings: &RatingsData,
+    rel_key: &str,
+    rel: &str,
+    project_root: &str,
+) -> String {
+    if let Some(v) = ratings.ratings.get(rel_key) {
+        return v.clone();
+    }
+    if rel != rel_key {
+        if let Some(v) = ratings.ratings.get(rel) {
+            return v.clone();
+        }
+    }
+    let want = normalize_key_for_lookup(rel_key);
+    let root_norm = normalize_key_for_lookup(project_root);
+    for (k, v) in &ratings.ratings {
+        if normalize_key_for_lookup(k) == want {
+            return v.clone();
+        }
+        // Keys may have been stored as absolute paths if strip_prefix failed when project was opened
+        let k_norm = normalize_key_for_lookup(k);
+        if !root_norm.is_empty()
+            && k_norm.len() > root_norm.len()
+            && (k_norm.starts_with(&root_norm) || k_norm.starts_with(&root_norm.replace('\\', "/")))
+        {
+            let suffix = k_norm
+                .strip_prefix(&root_norm)
+                .or_else(|| k_norm.strip_prefix(&root_norm.replace('\\', "/")))
+                .unwrap_or(k_norm.as_str());
+            let suffix_trim = suffix.trim_start_matches(|c| c == '/' || c == '\\');
+            if !suffix_trim.is_empty() && normalize_key_for_lookup(suffix_trim) == want {
+                return v.clone();
+            }
+        }
+    }
+    "none".to_string()
+}
+
 #[tauri::command]
-pub async fn export_by_rating(
-    options: ExportByRatingOptions,
-) -> Result<ExportResult, String> {
+pub async fn export_by_rating(options: ExportByRatingOptions) -> Result<ExportResult, String> {
     let root = PathBuf::from(&options.source_path);
-    if !root.exists() || !root.is_dir() {
+    if !root.is_dir() {
         return Err("Source folder does not exist".to_string());
     }
-    // Match open_project exactly: canonical root for strip_prefix, load ratings from same path frontend uses
-    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
-    let ratings_data = load_ratings(&options.source_path);
 
-    let mut images_by_rating: HashMap<String, Vec<PathBuf>> = HashMap::new();
-    images_by_rating.insert("good".to_string(), Vec::new());
-    images_by_rating.insert("bad".to_string(), Vec::new());
-    images_by_rating.insert("needs_edit".to_string(), Vec::new());
+    let canonical = root.canonicalize().map_err(|e| e.to_string())?;
+    let project_root = canonical.to_str().unwrap_or(options.source_path.as_str());
+    let ratings = load_ratings(project_root);
 
-    // Walk from root (same as open_project), compute relative_path using canonical_root (same as open_project)
-    for entry in WalkDir::new(&root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || !is_image_path(path) {
+    let mut by_rating: std::collections::HashMap<&'static str, Vec<PathBuf>> = [
+        ("good", Vec::new()),
+        ("bad", Vec::new()),
+        ("needs_edit", Vec::new()),
+    ]
+    .into_iter()
+    .collect();
+
+    // Walk from canonical so strip_prefix(canonical) always succeeds and matches how project stores relative_path.
+    for entry in WalkDir::new(&canonical).follow_links(false).into_iter().filter_map(Result::ok) {
+        let p = entry.path();
+        if !p.is_file() || !is_image(p) {
             continue;
         }
-        let path_buf = path.to_path_buf();
-        let relative = path_buf.strip_prefix(&canonical_root).unwrap_or(&path_buf);
-        let rel: String = relative
-            .to_str()
-            .map(|s| s.replace('\\', "/"))
-            .unwrap_or_default();
+        let rel = match p.strip_prefix(&canonical) {
+            Ok(r) => r.to_str().map(|s| s.replace('\\', "/")).unwrap_or_default(),
+            Err(_) => continue,
+        };
         if rel.is_empty() {
             continue;
         }
-        // Lookup: try exact key, trimmed (no leading slash), with leading slash (Windows strip_prefix can yield either), and backslash variants
-        let rel_trimmed = rel.trim_start_matches(|c| c == '/' || c == '\\');
-        let rel_with_leading = format!("/{}", rel_trimmed);
-        let rel_backslash = rel.replace('/', "\\");
-        let rel_trimmed_backslash = rel_trimmed.replace('/', "\\");
-        let rel_trimmed_leading_backslash = format!("\\{}", rel_trimmed);
+        let rel_key = normalize_rel(&rel);
+        if rel_key.is_empty() {
+            continue;
+        }
 
-        let rating_str = ratings_data
-            .ratings
-            .get(&rel)
-            .or_else(|| ratings_data.ratings.get(rel_trimmed))
-            .or_else(|| ratings_data.ratings.get(&rel_with_leading))
-            .or_else(|| ratings_data.ratings.get(&rel_backslash))
-            .or_else(|| ratings_data.ratings.get(&rel_trimmed_backslash))
-            .or_else(|| ratings_data.ratings.get(&rel_trimmed_leading_backslash))
-            // Windows: case-insensitive fallback (ratings key might differ in casing)
-            .or_else(|| {
-                ratings_data.ratings.iter().find(|(k, _)| {
-                    k.eq_ignore_ascii_case(&rel)
-                        || k.eq_ignore_ascii_case(rel_trimmed)
-                        || k.as_str().trim_start_matches(|c: char| c == '/' || c == '\\').eq_ignore_ascii_case(rel_trimmed)
-                }).map(|(_, v)| v)
-            })
-            .map(|s| s.as_str())
-            .unwrap_or("none");
-        let rating = ImageRating::from_str(rating_str);
-        let key = match rating {
-            ImageRating::Good => "good",
-            ImageRating::Bad => "bad",
-            ImageRating::NeedsEdit => "needs_edit",
-            ImageRating::None => continue,
-        };
-        images_by_rating
-            .get_mut(key)
-            .unwrap()
-            .push(path_buf);
+        let rating_str = get_rating_for_path(&ratings, &rel_key, &rel, project_root);
+        let rating = ImageRating::from_str(&rating_str);
+        if let Some(key) = rating_key(rating) {
+            by_rating.get_mut(key).unwrap().push(p.to_path_buf());
+        }
     }
 
     let dest = PathBuf::from(&options.dest_path);
     fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
 
-    let mut total_exported = 0;
-    let mut total_skipped = 0;
+    let mut total_exported = 0usize;
+    let mut total_skipped = 0usize;
 
-    for (subdir, images) in &mut images_by_rating {
-        images.sort();
-        let sub_path = dest.join(subdir);
-        fs::create_dir_all(&sub_path).map_err(|e| e.to_string())?;
+    for (subdir, list) in by_rating.iter_mut() {
+        list.sort();
+        let sub = dest.join(*subdir);
+        fs::create_dir_all(&sub).map_err(|e| e.to_string())?;
 
-        for (i, img_path) in images.iter().enumerate() {
-            let ext = img_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("png");
-            let new_name = if options.sequential_naming {
+        for (i, img) in list.iter().enumerate() {
+            let ext = img.extension().and_then(|e| e.to_str()).unwrap_or("png");
+            let name = if options.sequential_naming {
                 format!("{:04}.{}", i + 1, ext)
             } else {
-                img_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("image.png")
-                    .to_string()
+                img.file_name().and_then(|n| n.to_str()).unwrap_or("image.png").to_string()
             };
-            let dest_img = sub_path.join(&new_name);
-            let base = new_name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&new_name);
-            let dest_txt = sub_path.join(format!("{}.txt", base));
 
-            if fs::copy(img_path, &dest_img).is_err() {
+            let dest_img = sub.join(&name);
+            if fs::copy(img, &dest_img).is_err() {
                 total_skipped += 1;
                 continue;
             }
 
-            let caption_path = caption_path_for(img_path);
-            if caption_path.exists() {
-                if let Ok(content) = fs::read_to_string(&caption_path) {
-                    let final_content = if let Some(ref trigger) = options.trigger_word {
-                        if !trigger.is_empty() {
-                            format!("{}, {}", trigger.trim(), content.trim())
-                        } else {
-                            content.trim().to_string()
-                        }
-                    } else {
-                        content.trim().to_string()
-                    };
-                    let _ = fs::write(&dest_txt, final_content);
+            let base = name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&name);
+            let dest_txt = sub.join(format!("{}.txt", base));
+            let cap_src = caption_path(img);
+            if cap_src.exists() {
+                if let Ok(content) = fs::read_to_string(&cap_src) {
+                    let out = apply_trigger(&content, options.trigger_word.as_ref());
+                    let _ = fs::write(&dest_txt, out);
                 }
             }
             total_exported += 1;

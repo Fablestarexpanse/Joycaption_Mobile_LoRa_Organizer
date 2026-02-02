@@ -3,7 +3,6 @@ import { Toolbar } from "./components/layout/Toolbar";
 import { AppLayout } from "./components/layout/AppLayout";
 import { StatusBar } from "./components/layout/StatusBar";
 import { Toast } from "./components/layout/Toast";
-import { ResourceMonitor } from "./components/layout/ResourceMonitor";
 import { ImagePreviewModal } from "./components/preview/ImagePreviewModal";
 import { CropModal } from "./components/preview/CropModal";
 import { ProjectLoadOverlay } from "./components/project/ProjectLoadOverlay";
@@ -29,7 +28,6 @@ function App() {
   return (
     <div className="flex h-screen flex-col bg-surface">
       <Toolbar />
-      <ResourceMonitor visible />
       <main className="flex flex-1 min-h-0">
         <AppLayout />
       </main>

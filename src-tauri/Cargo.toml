@@ -25,7 +25,6 @@ futures = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 hex = "0.4"
-sysinfo = "0.31"
 
 [features]
 default = ["custom-protocol"]

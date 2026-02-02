@@ -20,6 +20,7 @@ pub fn run() {
             commands::captions::add_tag,
             commands::captions::remove_tag,
             commands::captions::reorder_tags,
+            commands::captions::clear_all_captions,
             commands::lm_studio::test_lm_studio_connection,
             commands::lm_studio::generate_caption_lm_studio,
             commands::lm_studio::generate_captions_batch,
@@ -29,7 +30,6 @@ pub fn run() {
             commands::ratings::set_rating,
             commands::ratings::get_ratings,
             commands::ratings::clear_all_ratings,
-            commands::resource_monitor::get_resource_stats,
             commands::batch_rename::batch_rename,
         ])
         .run(tauri::generate_context!())

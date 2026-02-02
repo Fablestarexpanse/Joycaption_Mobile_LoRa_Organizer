@@ -5,9 +5,9 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useProjectImages } from "@/hooks/useProject";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
-import { writeCaption } from "@/lib/tauri";
+import { clearAllCaptions } from "@/lib/tauri";
 
-const CONFIRM_WORD = "delete";
+const CONFIRM_WORD = "clear";
 
 interface ClearAllTagsModalProps {
   isOpen: boolean;
@@ -25,9 +25,8 @@ export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
 
   const clearAllMutation = useMutation({
     mutationFn: async () => {
-      for (const entry of images) {
-        await writeCaption(entry.path, []);
-      }
+      if (!rootPath) throw new Error("No project open.");
+      return clearAllCaptions(rootPath);
     },
     onSuccess: () => {
       if (rootPath) {

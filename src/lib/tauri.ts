@@ -14,6 +14,17 @@ import type {
   BatchRenameResult,
 } from "@/types";
 
+/**
+ * Tauri invoke payload convention:
+ * - Commands that expect { payload: { ... } }: open_project, get_thumbnail, get_image_data_url,
+ *   crop_image, read_caption, write_caption, add_tag, remove_tag, reorder_tags,
+ *   test_lm_studio_connection, test_ollama_connection, generate_caption_lm_studio, generate_captions_batch,
+ *   clear_all_ratings, set_rating, get_ratings, batch_rename.
+ * - Commands that expect the args object directly (no "payload" key): find_duplicates, delete_image,
+ *   batch_resize, export_dataset, export_by_rating.
+ * - No args: get_resource_stats.
+ */
+
 export async function openFolder(): Promise<string | null> {
   const selected = await open({
     directory: true,
@@ -144,6 +155,18 @@ export async function reorderTags(
   });
 }
 
+export interface ClearAllCaptionsResult {
+  cleared_count: number;
+}
+
+export async function clearAllCaptions(
+  rootPath: string
+): Promise<ClearAllCaptionsResult> {
+  return invoke<ClearAllCaptionsResult>("clear_all_captions", {
+    payload: { root_path: rootPath },
+  });
+}
+
 // ============ AI Functions ============
 
 export async function testLmStudioConnection(
@@ -203,7 +226,7 @@ export async function generateCaptionsBatch(
 export async function exportDataset(
   options: ExportOptions
 ): Promise<ExportResult> {
-  return invoke<ExportResult>("export_dataset", { ...options });
+  return invoke<ExportResult>("export_dataset", { options: options as unknown as Record<string, unknown> });
 }
 
 export async function selectSaveFolder(): Promise<string | null> {
@@ -218,7 +241,7 @@ export async function selectSaveFolder(): Promise<string | null> {
 export async function exportByRating(
   options: ExportByRatingOptions
 ): Promise<ExportResult> {
-  return invoke<ExportResult>("export_by_rating", { options });
+  return invoke<ExportResult>("export_by_rating", { options: options as unknown as Record<string, unknown> });
 }
 
 export async function selectSaveFile(
@@ -237,7 +260,7 @@ export async function selectSaveFile(
 /** Clear all ratings for a project. Returns count of cleared ratings. */
 export async function clearAllRatings(rootPath: string): Promise<number> {
   return invoke<number>("clear_all_ratings", {
-    root_path: rootPath,
+    payload: { root_path: rootPath },
   });
 }
 
@@ -271,27 +294,4 @@ export async function batchRename(
   return invoke<BatchRenameResult>("batch_rename", {
     payload: options,
   });
-}
-
-// ============ Resource Monitor ============
-
-export interface ResourceStats {
-  cpu: { name: string; usage_percent: number };
-  memory: { usage_percent: number; used_gb: number; total_gb: number };
-  gpu?: {
-    name: string;
-    temperature_c?: number;
-    fan_percent?: number;
-    clock_mhz?: number;
-    usage_percent?: number;
-    memory_used_gb?: number;
-    memory_total_gb?: number;
-    memory_usage_percent?: number;
-    power_draw_w?: number;
-    power_limit_w?: number;
-  };
-}
-
-export async function getResourceStats(): Promise<ResourceStats> {
-  return invoke<ResourceStats>("get_resource_stats");
 }

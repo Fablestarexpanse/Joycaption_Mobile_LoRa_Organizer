@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AiProvider, PromptTemplate, LmStudioSettings, OllamaSettings } from "@/types";
-import { DEFAULT_PROMPT_TEMPLATES } from "@/types";
+import type {
+  AiProvider,
+  CaptionLength,
+  LmStudioSettings,
+  OllamaSettings,
+  PromptTemplate,
+} from "@/types";
+import { DEFAULT_PROMPT_TEMPLATES, EXTRA_OPTION_EXCLUSIVE_PAIRS } from "@/types";
 
 interface AiState {
   // Provider selection
@@ -11,6 +17,16 @@ interface AiState {
   // Custom prompt (editable by user)
   customPrompt: string;
   setCustomPrompt: (prompt: string) => void;
+
+  // Prompt variables
+  wordCount: number | null;
+  length: CaptionLength | null;
+  characterName: string;
+  extraOptionIds: string[];
+  setWordCount: (n: number | null) => void;
+  setLength: (length: CaptionLength | null) => void;
+  setCharacterName: (name: string) => void;
+  toggleExtraOption: (id: string) => void;
 
   // LM Studio settings
   lmStudio: LmStudioSettings;
@@ -55,9 +71,32 @@ export const useAiStore = create<AiState>()(
       provider: "lm_studio",
       setProvider: (provider) => set({ provider }),
 
-      // Custom prompt
-      customPrompt: "Write a detailed description for this image.",
+      // Custom prompt (matches first template)
+      customPrompt: "Write a long detailed description for this image.",
       setCustomPrompt: (customPrompt) => set({ customPrompt }),
+
+      // Prompt variables
+      wordCount: null,
+      length: null,
+      characterName: "",
+      extraOptionIds: [],
+      setWordCount: (wordCount) => set({ wordCount }),
+      setLength: (length) => set({ length }),
+      setCharacterName: (characterName) => set({ characterName }),
+      toggleExtraOption: (id) =>
+        set((state) => {
+          const next = new Set(state.extraOptionIds);
+          if (next.has(id)) {
+            next.delete(id);
+          } else {
+            for (const [a, b] of EXTRA_OPTION_EXCLUSIVE_PAIRS) {
+              if (id === a) next.delete(b);
+              else if (id === b) next.delete(a);
+            }
+            next.add(id);
+          }
+          return { extraOptionIds: Array.from(next) };
+        }),
 
       // LM Studio
       lmStudio: {
@@ -136,6 +175,10 @@ export const useAiStore = create<AiState>()(
       partialize: (state) => ({
         provider: state.provider,
         customPrompt: state.customPrompt,
+        wordCount: state.wordCount,
+        length: state.length,
+        characterName: state.characterName,
+        extraOptionIds: state.extraOptionIds,
         lmStudio: state.lmStudio,
         ollama: state.ollama,
         promptTemplates: state.promptTemplates,

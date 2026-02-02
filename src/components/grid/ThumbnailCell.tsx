@@ -1,12 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Smile, Frown, Wrench, Loader2, Maximize2, Crop, Trash2, X, Eraser, Check } from "lucide-react";
+import { Smile, Frown, Wrench, Loader2, Maximize2, Crop, Trash2, X, Eraser, Check, Sparkles } from "lucide-react";
 import {
   getThumbnailDataUrl,
   writeCaption,
   setImageRating,
   deleteImage,
+  generateCaptionLmStudio,
 } from "@/lib/tauri";
+import { buildEffectivePrompt } from "@/lib/promptBuilder";
+import { useAiStore } from "@/stores/aiStore";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useSearchReplaceStore } from "@/stores/searchReplaceStore";
 import { useProjectStore } from "@/stores/projectStore";
@@ -111,8 +114,31 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
   const toggleSelection = useSelectionStore((s) => s.toggleSelection);
   const openPreview = useUiStore((s) => s.openPreview);
   const openCrop = useUiStore((s) => s.openCrop);
+  const showToast = useUiStore((s) => s.showToast);
   const rootPath = useProjectStore((s) => s.rootPath);
   const queryClient = useQueryClient();
+
+  const {
+    provider,
+    lmStudio,
+    ollama,
+    customPrompt,
+    promptTemplates,
+    selectedTemplateId,
+    wordCount,
+    length,
+    characterName,
+    extraOptionIds,
+  } = useAiStore();
+  const selectedTemplate = promptTemplates.find((t) => t.id === selectedTemplateId);
+  const basePrompt =
+    customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.";
+  const effectivePrompt = buildEffectivePrompt(basePrompt, {
+    wordCount,
+    length,
+    characterName,
+    extraOptionIds,
+  });
 
   const [captionText, setCaptionText] = useState(() => tagsToText(entry.tags));
   const [isEditing, setIsEditing] = useState(false);
@@ -159,6 +185,29 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
         setSelectedImage(null);
       }
       invalidateProject();
+    },
+  });
+
+  const baseUrl = provider === "ollama" ? ollama.base_url : lmStudio.base_url;
+  const model = provider === "ollama" ? ollama.model : lmStudio.model;
+  const generateCaptionMutation = useMutation({
+    mutationFn: async () => {
+      return generateCaptionLmStudio(entry.path, baseUrl, model, effectivePrompt);
+    },
+    onSuccess: async (result) => {
+      if (result?.success && result.caption) {
+        const tags = result.caption
+          .split(",")
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0);
+        await writeCaption(entry.path, tags);
+        invalidateProject();
+      } else if (result?.error) {
+        showToast(result.error);
+      }
+    },
+    onError: (err: Error) => {
+      showToast(err.message);
     },
   });
 
@@ -368,7 +417,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
         )}
       </div>
 
-      {/* Rating icons (Good / Bad / Edit), View larger, Crop, Delete, Generate — wrap to fit */}
+      {/* Rating icons, Generate caption, View larger, Crop, Delete, Clear tags */}
       <div className="flex flex-wrap items-center justify-center gap-0.5 px-0.5 py-1">
         <button
           type="button"
@@ -407,6 +456,22 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
           <Wrench className="h-3.5 w-3.5" />
         </button>
         <span className="mx-0.5 h-3 w-px bg-gray-600" aria-hidden />
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            generateCaptionMutation.mutate();
+          }}
+          disabled={generateCaptionMutation.isPending}
+          className="rounded p-0.5 text-gray-500 hover:bg-purple-600/20 hover:text-purple-400 disabled:opacity-30"
+          title="Generate caption for this image"
+        >
+          {generateCaptionMutation.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
+          )}
+        </button>
         <button
           type="button"
           onClick={handleViewLarger}

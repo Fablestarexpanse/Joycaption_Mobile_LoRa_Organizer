@@ -1,11 +1,13 @@
-import { useEffect, useState, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Crop } from "lucide-react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Crop, Smile, Frown, Wrench } from "lucide-react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useProjectImages } from "@/hooks/useProject";
+import { useProjectStore } from "@/stores/projectStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
-import { getImageDataUrl } from "@/lib/tauri";
+import { getImageDataUrl, setImageRating } from "@/lib/tauri";
+import type { ImageRating } from "@/types";
 
 interface ImagePreviewModalProps {
   isOpen: boolean;
@@ -18,9 +20,35 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
   const selectedImage = useSelectionStore((s) => s.selectedImage);
   const setSelectedImage = useSelectionStore((s) => s.setSelectedImage);
   const { data: images = [] } = useProjectImages();
+  const rootPath = useProjectStore((s) => s.rootPath);
   const openCrop = useUiStore((s) => s.openCrop);
+  const queryClient = useQueryClient();
 
   const [zoom, setZoom] = useState(1);
+
+  const invalidateProject = useCallback(() => {
+    if (rootPath) {
+      queryClient.invalidateQueries({ queryKey: ["project", "images", rootPath] });
+    }
+  }, [queryClient, rootPath]);
+
+  const ratingMutation = useMutation({
+    mutationFn: async (rating: ImageRating) => {
+      if (!rootPath || !selectedImage) throw new Error("No project or image");
+      return setImageRating(rootPath, selectedImage.relative_path, rating);
+    },
+    onSuccess: (_data, newRating) => {
+      invalidateProject();
+      if (selectedImage) {
+        setSelectedImage({ ...selectedImage, rating: newRating });
+      }
+    },
+  });
+
+  function handleRatingClick(rating: ImageRating) {
+    const newRating = selectedImage!.rating === rating ? "none" : rating;
+    ratingMutation.mutate(newRating);
+  }
 
   const currentIndex = selectedImage
     ? images.findIndex((img) => img.id === selectedImage.id)
@@ -103,6 +131,45 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
           <span className="truncate text-sm text-gray-200" title={selectedImage.path}>
             {selectedImage.filename}
           </span>
+          {/* Good / Bad / Needs Edit */}
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => handleRatingClick("good")}
+              className={`rounded p-1.5 transition-colors ${
+                selectedImage.rating === "good"
+                  ? "bg-green-600 text-white"
+                  : "text-gray-500 hover:bg-green-600/20 hover:text-green-400"
+              }`}
+              title="Good"
+            >
+              <Smile className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRatingClick("bad")}
+              className={`rounded p-1.5 transition-colors ${
+                selectedImage.rating === "bad"
+                  ? "bg-red-600 text-white"
+                  : "text-gray-500 hover:bg-red-600/20 hover:text-red-400"
+              }`}
+              title="Bad"
+            >
+              <Frown className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRatingClick("needs_edit")}
+              className={`rounded p-1.5 transition-colors ${
+                selectedImage.rating === "needs_edit"
+                  ? "bg-yellow-600 text-white"
+                  : "text-gray-500 hover:bg-yellow-600/20 hover:text-yellow-400"
+              }`}
+              title="Needs work"
+            >
+              <Wrench className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
