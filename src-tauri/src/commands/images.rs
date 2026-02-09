@@ -1,7 +1,8 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::imageops::FilterType;
 use image::ImageFormat;
-use serde::Deserialize;
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Cursor, Read, Write};
@@ -460,4 +461,102 @@ pub fn multi_crop(payload: MultiCropPayload) -> Result<Vec<String>, String> {
     }
 
     Ok(output_paths)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetThumbnailsBatchPayload {
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub size: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ThumbnailResult {
+    pub path: String,
+    pub data_url: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Generate thumbnails for multiple images in parallel
+#[tauri::command]
+pub fn get_thumbnails_batch(payload: GetThumbnailsBatchPayload) -> Result<Vec<ThumbnailResult>, String> {
+    let size = payload.size.unwrap_or(THUMB_SIZE).min(512);
+    let cache_dir = thumbnail_cache_dir()?;
+
+    let results: Vec<ThumbnailResult> = payload
+        .paths
+        .par_iter()
+        .map(|path_str| {
+            let path = PathBuf::from(path_str);
+            
+            if !path.exists() || !path.is_file() {
+                return ThumbnailResult {
+                    path: path_str.clone(),
+                    data_url: None,
+                    error: Some("File not found".to_string()),
+                };
+            }
+
+            // Try to get from cache
+            match thumbnail_cache_key(&path, size) {
+                Ok(key) => {
+                    let cache_path = cache_dir.join(format!("{}.jpg", key));
+                    
+                    if cache_path.exists() && cache_path.is_file() {
+                        if let Ok(mut f) = fs::File::open(&cache_path) {
+                            let mut buf = Vec::new();
+                            if f.read_to_end(&mut buf).is_ok() {
+                                let b64 = BASE64.encode(&buf);
+                                return ThumbnailResult {
+                                    path: path_str.clone(),
+                                    data_url: Some(format!("data:image/jpeg;base64,{b64}")),
+                                    error: None,
+                                };
+                            }
+                        }
+                    }
+
+                    // Generate thumbnail
+                    match image::open(&path) {
+                        Ok(img) => {
+                            let thumb = img.resize(size, size, FilterType::Triangle);
+                            let mut buf = Vec::new();
+                            
+                            if thumb.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg).is_ok() {
+                                // Try to cache
+                                if let Ok(mut f) = fs::File::create(&cache_path) {
+                                    let _ = f.write_all(&buf);
+                                }
+                                
+                                let b64 = BASE64.encode(&buf);
+                                ThumbnailResult {
+                                    path: path_str.clone(),
+                                    data_url: Some(format!("data:image/jpeg;base64,{b64}")),
+                                    error: None,
+                                }
+                            } else {
+                                ThumbnailResult {
+                                    path: path_str.clone(),
+                                    data_url: None,
+                                    error: Some("Failed to encode thumbnail".to_string()),
+                                }
+                            }
+                        }
+                        Err(e) => ThumbnailResult {
+                            path: path_str.clone(),
+                            data_url: None,
+                            error: Some(e.to_string()),
+                        },
+                    }
+                }
+                Err(e) => ThumbnailResult {
+                    path: path_str.clone(),
+                    data_url: None,
+                    error: Some(e),
+                },
+            }
+        })
+        .collect();
+
+    Ok(results)
 }

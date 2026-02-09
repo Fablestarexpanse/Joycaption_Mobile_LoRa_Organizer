@@ -1,10 +1,12 @@
 use image::ImageReader;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
@@ -40,6 +42,12 @@ fn parse_tags(raw: &str) -> Vec<String> {
 #[derive(Debug, Deserialize)]
 pub struct OpenProjectPayload {
     pub root_path: String,
+    #[serde(default = "default_false")]
+    pub include_dimensions: bool,
+}
+
+fn default_false() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,11 +134,15 @@ pub fn open_project(app: AppHandle, payload: OpenProjectPayload) -> Result<Vec<I
             .map(|s| ImageRating::from_str(s))
             .unwrap_or(ImageRating::None);
 
-        // Read image dimensions (header only, fast)
-        let (width, height) = ImageReader::open(&path_buf)
-            .ok()
-            .and_then(|r| r.into_dimensions().ok())
-            .unwrap_or((0u32, 0u32));
+        // Read image dimensions (header only, fast) - optional for performance
+        let (width, height) = if payload.include_dimensions {
+            ImageReader::open(&path_buf)
+                .ok()
+                .and_then(|r| r.into_dimensions().ok())
+                .unwrap_or((0u32, 0u32))
+        } else {
+            (0u32, 0u32)
+        };
         let width = if width > 0 { Some(width) } else { None };
         let height = if height > 0 { Some(height) } else { None };
 
@@ -149,8 +161,8 @@ pub fn open_project(app: AppHandle, payload: OpenProjectPayload) -> Result<Vec<I
             file_size,
         });
 
-        // Emit progress every 50 images
-        if entries.len() % 50 == 0 {
+        // Emit progress every 25 images (more frequent for better UX)
+        if entries.len() % 25 == 0 {
             let _ = app.emit(PROGRESS_EVENT, ProjectLoadProgress { count: entries.len() });
         }
     }
@@ -181,51 +193,94 @@ pub fn find_duplicates(payload: FindDuplicatesPayload) -> Result<FindDuplicatesR
     }
     let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
 
-    let mut hash_to_paths: HashMap<String, Vec<String>> = HashMap::new();
-
-    for entry in WalkDir::new(&root)
+    // Collect all image paths first
+    let image_paths: Vec<PathBuf> = WalkDir::new(&root)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || !is_image_path(path) {
-            continue;
-        }
+        .filter(|entry| {
+            let path = entry.path();
+            path.is_file() && is_image_path(path)
+        })
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
 
-        let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
-        let mut hasher = Sha256::new();
-        let mut buf = [0u8; 8192];
-        loop {
-            let n = file.read(&mut buf).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
+    // Parallel hash computation
+    let hash_to_paths: Mutex<HashMap<String, Vec<String>>> = Mutex::new(HashMap::new());
+    
+    image_paths.par_iter().for_each(|path| {
+        // Hash the file
+        if let Ok(mut file) = fs::File::open(path) {
+            let mut hasher = Sha256::new();
+            let mut buf = [0u8; 8192];
+            loop {
+                match file.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => hasher.update(&buf[..n]),
+                    Err(_) => return,
+                }
             }
-            hasher.update(&buf[..n]);
+            let hash_hex = hex::encode(hasher.finalize());
+
+            // Get relative path
+            let relative = path
+                .strip_prefix(&canonical_root)
+                .unwrap_or(path);
+            let rel_str = relative
+                .to_str()
+                .map(|s| s.replace('\\', "/"))
+                .unwrap_or_default();
+            
+            if !rel_str.is_empty() {
+                let mut map = hash_to_paths.lock().unwrap();
+                map.entry(hash_hex)
+                    .or_default()
+                    .push(rel_str);
+            }
         }
-        let hash_hex = hex::encode(hasher.finalize());
+    });
 
-        let relative = path
-            .strip_prefix(&canonical_root)
-            .unwrap_or(path);
-        let rel_str = relative
-            .to_str()
-            .map(|s| s.replace('\\', "/"))
-            .unwrap_or_default();
-        if rel_str.is_empty() {
-            continue;
-        }
-
-        hash_to_paths
-            .entry(hash_hex)
-            .or_default()
-            .push(rel_str);
-    }
-
+    let hash_to_paths = hash_to_paths.into_inner().unwrap();
     let groups: Vec<Vec<String>> = hash_to_paths
         .into_values()
         .filter(|v| v.len() > 1)
         .collect();
 
     Ok(FindDuplicatesResult { groups })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoadImageDimensionsPayload {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImageDimensions {
+    pub path: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// Load image dimensions in parallel for a batch of images
+#[tauri::command]
+pub fn load_image_dimensions(payload: LoadImageDimensionsPayload) -> Result<Vec<ImageDimensions>, String> {
+    let results: Vec<ImageDimensions> = payload
+        .paths
+        .par_iter()
+        .map(|path_str| {
+            let path = PathBuf::from(path_str);
+            let (width, height) = ImageReader::open(&path)
+                .ok()
+                .and_then(|r| r.into_dimensions().ok())
+                .unwrap_or((0u32, 0u32));
+            
+            ImageDimensions {
+                path: path_str.clone(),
+                width: if width > 0 { Some(width) } else { None },
+                height: if height > 0 { Some(height) } else { None },
+            }
+        })
+        .collect();
+
+    Ok(results)
 }

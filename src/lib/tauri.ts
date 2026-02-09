@@ -35,9 +35,21 @@ export async function openFolder(): Promise<string | null> {
   return selected;
 }
 
-export async function loadProject(rootPath: string): Promise<ImageEntry[]> {
+export async function loadProject(rootPath: string, includeDimensions = false): Promise<ImageEntry[]> {
   return invoke<ImageEntry[]>("open_project", {
-    payload: { root_path: rootPath },
+    payload: { root_path: rootPath, include_dimensions: includeDimensions },
+  });
+}
+
+export interface ImageDimensions {
+  path: string;
+  width: number | null;
+  height: number | null;
+}
+
+export async function loadImageDimensions(paths: string[]): Promise<ImageDimensions[]> {
+  return invoke<ImageDimensions[]>("load_image_dimensions", {
+    payload: { paths },
   });
 }
 
@@ -58,6 +70,18 @@ export async function getThumbnailDataUrl(
 ): Promise<string> {
   return invoke<string>("get_thumbnail", {
     payload: { path, size },
+  });
+}
+
+export interface ThumbnailResult {
+  path: string;
+  data_url: string | null;
+  error: string | null;
+}
+
+export async function getThumbnailsBatch(paths: string[], size = 256): Promise<ThumbnailResult[]> {
+  return invoke<ThumbnailResult[]>("get_thumbnails_batch", {
+    payload: { paths, size },
   });
 }
 

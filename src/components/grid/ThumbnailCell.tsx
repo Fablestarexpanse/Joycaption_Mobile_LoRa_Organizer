@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, memo, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Smile, Frown, Wrench, Loader2, Maximize2, Crop, Trash2, X, Eraser, Check, Sparkles } from "lucide-react";
 import {
@@ -107,7 +107,10 @@ interface ThumbnailCellProps {
   isInCaptionBatch?: boolean;
 }
 
-export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: ThumbnailCellProps) {
+export const ThumbnailCell = memo(function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: ThumbnailCellProps) {
+  const cellRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  
   const selectedImage = useSelectionStore((s) => s.selectedImage);
   const setSelectedImage = useSelectionStore((s) => s.setSelectedImage);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
@@ -118,27 +121,62 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
   const rootPath = useProjectStore((s) => s.rootPath);
   const queryClient = useQueryClient();
 
-  const {
-    provider,
-    lmStudio,
-    ollama,
-    customPrompt,
-    promptTemplates,
-    selectedTemplateId,
-    wordCount,
-    length,
-    characterName,
-    extraOptionIds,
-  } = useAiStore();
-  const selectedTemplate = promptTemplates.find((t) => t.id === selectedTemplateId);
-  const basePrompt =
-    customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.";
-  const effectivePrompt = buildEffectivePrompt(basePrompt, {
-    wordCount,
-    length,
-    characterName,
-    extraOptionIds,
-  });
+  // Intersection observer for lazy loading
+  useEffect(() => {
+    const element = cellRef.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            // Once visible, we don't need to observe anymore
+            observer.disconnect();
+          }
+        });
+      },
+      {
+        rootMargin: "200px", // Start loading 200px before entering viewport
+      }
+    );
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Use individual selectors to avoid unnecessary re-renders
+  const provider = useAiStore((s) => s.provider);
+  const lmStudio = useAiStore((s) => s.lmStudio);
+  const ollama = useAiStore((s) => s.ollama);
+  const customPrompt = useAiStore((s) => s.customPrompt);
+  const promptTemplates = useAiStore((s) => s.promptTemplates);
+  const selectedTemplateId = useAiStore((s) => s.selectedTemplateId);
+  const wordCount = useAiStore((s) => s.wordCount);
+  const length = useAiStore((s) => s.length);
+  const characterName = useAiStore((s) => s.characterName);
+  const extraOptionIds = useAiStore((s) => s.extraOptionIds);
+  
+  const selectedTemplate = useMemo(
+    () => promptTemplates.find((t) => t.id === selectedTemplateId),
+    [promptTemplates, selectedTemplateId]
+  );
+  
+  const basePrompt = useMemo(
+    () => customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.",
+    [customPrompt, selectedTemplate]
+  );
+  
+  const effectivePrompt = useMemo(
+    () => buildEffectivePrompt(basePrompt, {
+      wordCount,
+      length,
+      characterName,
+      extraOptionIds,
+    }),
+    [basePrompt, wordCount, length, characterName, extraOptionIds]
+  );
 
   const [captionText, setCaptionText] = useState(() => tagsToText(entry.tags));
   const [isEditing, setIsEditing] = useState(false);
@@ -159,15 +197,21 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
   const isSelected = selectedImage?.id === entry.id;
   const isMultiSelected = selectedIds.has(entry.id);
 
-  const invalidateProject = useCallback(() => {
-    if (rootPath) {
-      queryClient.invalidateQueries({ queryKey: ["project", "images", rootPath] });
-    }
-  }, [queryClient, rootPath]);
-
   const writeMutation = useMutation({
     mutationFn: async (tags: string[]) => writeCaption(entry.path, tags),
-    onSuccess: invalidateProject,
+    onSuccess: (_, tags) => {
+      // Optimistic update: update cache directly instead of full refetch
+      if (rootPath) {
+        queryClient.setQueryData(["project", "images", rootPath], (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((img: any) =>
+            img.id === entry.id
+              ? { ...img, has_caption: tags.length > 0, tags }
+              : img
+          );
+        });
+      }
+    },
   });
 
   const ratingMutation = useMutation({
@@ -175,7 +219,24 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
       if (!rootPath) throw new Error("No project open");
       return setImageRating(rootPath, entry.relative_path, rating);
     },
-    onSuccess: invalidateProject,
+    onSuccess: (_, rating) => {
+      // Optimistic update: update cache directly instead of full refetch
+      if (rootPath) {
+        queryClient.setQueryData(["project", "images", rootPath], (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((img: any) =>
+            img.id === entry.id
+              ? { ...img, rating }
+              : img
+          );
+        });
+        
+        // Also update selectedImage if this is the selected one
+        if (selectedImage?.id === entry.id) {
+          setSelectedImage({ ...selectedImage, rating });
+        }
+      }
+    },
   });
 
   const deleteMutation = useMutation({
@@ -184,7 +245,13 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
       if (selectedImage?.id === entry.id) {
         setSelectedImage(null);
       }
-      invalidateProject();
+      // Optimistic update: remove from cache instead of full refetch
+      if (rootPath) {
+        queryClient.setQueryData(["project", "images", rootPath], (old: any) => {
+          if (!Array.isArray(old)) return old;
+          return old.filter((img: any) => img.id !== entry.id);
+        });
+      }
     },
   });
 
@@ -201,7 +268,18 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
           .map((t) => t.trim())
           .filter((t) => t.length > 0);
         await writeCaption(entry.path, tags);
-        invalidateProject();
+        
+        // Optimistic update
+        if (rootPath) {
+          queryClient.setQueryData(["project", "images", rootPath], (old: any) => {
+            if (!Array.isArray(old)) return old;
+            return old.map((img: any) =>
+              img.id === entry.id
+                ? { ...img, has_caption: true, tags }
+                : img
+            );
+          });
+        }
       } else if (result?.error) {
         showToast(result.error);
       }
@@ -211,17 +289,24 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
     },
   });
 
-  const displayText = tagsToText(entry.tags);
-  const showAddTagPreview =
-    addTagPreviewText.trim() !== "" &&
-    (addTagRatingFilter === "all" || entry.rating === addTagRatingFilter);
-  const previewTags =
-    !showAddTagPreview
+  const displayText = useMemo(() => tagsToText(entry.tags), [entry.tags]);
+  
+  const showAddTagPreview = useMemo(
+    () => addTagPreviewText.trim() !== "" &&
+      (addTagRatingFilter === "all" || entry.rating === addTagRatingFilter),
+    [addTagPreviewText, addTagRatingFilter, entry.rating]
+  );
+  
+  const previewTags = useMemo(
+    () => !showAddTagPreview
       ? entry.tags
       : addTagPreviewAtFront
         ? [addTagPreviewText.trim(), ...entry.tags]
-        : [...entry.tags, addTagPreviewText.trim()];
-  const previewDisplayText = tagsToText(previewTags);
+        : [...entry.tags, addTagPreviewText.trim()],
+    [showAddTagPreview, entry.tags, addTagPreviewAtFront, addTagPreviewText]
+  );
+  
+  const previewDisplayText = useMemo(() => tagsToText(previewTags), [previewTags]);
 
   function handleCaptionFocus() {
     setIsEditing(true);
@@ -276,6 +361,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
     queryKey: ["thumbnail", entry.path, size],
     queryFn: () => getThumbnailDataUrl(entry.path, size),
     staleTime: 5 * 60 * 1000,
+    enabled: isVisible, // Only load thumbnail when cell is visible
   });
 
   function handleImageClick(e: React.MouseEvent) {
@@ -360,6 +446,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
 
   return (
     <div
+      ref={cellRef}
       role="option"
       aria-selected={isSelected || isMultiSelected}
       aria-current={isSelected ? "true" : undefined}
@@ -668,10 +755,8 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
         </div>
       </div>
 
-      {/* Editable caption — keep tall when editing so you can see and add to it */}
-      <div
-        className={`px-1 pb-2 ${isEditing ? "min-h-[7rem] shrink-0" : ""}`}
-      >
+      {/* Editable caption — expands vertically to fit content */}
+      <div className="px-1 pb-2">
         {isEditing ? (
           <textarea
             ref={captionInputRef}
@@ -679,10 +764,9 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
             onChange={handleCaptionChange}
             onBlur={handleCaptionBlur}
             onKeyDown={handleCaptionKeyDown}
-            rows={Math.max(5, captionText.split("\n").length + 2)}
             placeholder="Add tags…"
-            className="w-full min-h-[6rem] resize-y rounded border border-border bg-gray-800/80 px-2 py-1.5 text-xs leading-relaxed text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-            style={{ minHeight: "6rem" }}
+            rows={Math.max(3, Math.ceil(captionText.length / 40))}
+            className="w-full min-h-[3rem] resize-none rounded border border-border bg-gray-800/80 px-2 py-1.5 text-xs leading-relaxed text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
@@ -699,7 +783,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
                 handleCaptionFocus();
               }
             }}
-            className="min-h-[2.5rem] w-full cursor-text whitespace-pre-wrap break-words rounded border border-border bg-gray-800/80 px-2 py-1.5 text-xs leading-relaxed text-gray-200 hover:border-gray-600 focus:border-blue-500 focus:outline-none"
+            className="min-h-[3rem] w-full cursor-text whitespace-pre-wrap break-words rounded border border-border bg-gray-800/80 px-2 py-1.5 text-xs leading-relaxed text-gray-200 hover:border-gray-600 focus:border-blue-500 focus:outline-none"
           >
             {showAddTagPreview ? (
               previewDisplayText ? (
@@ -723,4 +807,4 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
       </div>
     </div>
   );
-}
+});

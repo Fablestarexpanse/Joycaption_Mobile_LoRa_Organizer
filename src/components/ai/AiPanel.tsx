@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Sparkles,
@@ -79,16 +79,33 @@ export function AiPanel() {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const showToast = useUiStore((s) => s.showToast);
 
-  const selectedTemplate = promptTemplates.find((t) => t.id === selectedTemplateId);
+  const selectedTemplate = useMemo(
+    () => promptTemplates.find((t) => t.id === selectedTemplateId),
+    [promptTemplates, selectedTemplateId]
+  );
 
-  const basePrompt =
-    customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.";
-  const effectivePrompt = buildEffectivePrompt(basePrompt, {
-    wordCount,
-    length,
-    characterName,
-    extraOptionIds,
-  });
+  const basePrompt = useMemo(
+    () => customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.",
+    [customPrompt, selectedTemplate]
+  );
+  
+  const effectivePrompt = useMemo(
+    () => buildEffectivePrompt(basePrompt, {
+      wordCount,
+      length,
+      characterName,
+      extraOptionIds,
+    }),
+    [basePrompt, wordCount, length, characterName, extraOptionIds]
+  );
+  
+  // Memoize filtered templates to avoid re-filtering on every render
+  const filteredTemplates = useMemo(
+    () => promptTemplates.filter((t) => 
+      t.name.toLowerCase().includes(templateSearch.toLowerCase())
+    ),
+    [promptTemplates, templateSearch]
+  );
 
   const testConnectionMutation = useMutation({
     mutationFn: () =>
@@ -237,29 +254,37 @@ export function AiPanel() {
     cancelBatchRef.current = true;
   }
 
-  const uncaptionedCount = images.filter((img) => !img.has_caption).length;
-  let batchTargetImages: typeof images;
-  if (batchCaptionRatingAll) {
-    batchTargetImages = images;
-  } else if (batchCaptionRatingFilter.size > 0) {
-    batchTargetImages = images.filter((img) =>
-      batchCaptionRatingFilter.has(img.rating)
-    );
-  } else {
-    batchTargetImages =
-      selectedIds.size > 0
+  const uncaptionedCount = useMemo(
+    () => images.filter((img) => !img.has_caption).length,
+    [images]
+  );
+  
+  const batchTargetImages = useMemo(() => {
+    if (batchCaptionRatingAll) {
+      return images;
+    } else if (batchCaptionRatingFilter.size > 0) {
+      return images.filter((img) =>
+        batchCaptionRatingFilter.has(img.rating)
+      );
+    } else {
+      return selectedIds.size > 0
         ? images.filter((img) => selectedIds.has(img.id))
         : images.filter((img) => !img.has_caption);
-  }
+    }
+  }, [images, batchCaptionRatingAll, batchCaptionRatingFilter, selectedIds]);
+  
   const batchTargetCount = batchTargetImages.length;
-  const batchLabel =
-    batchCaptionRatingAll
+  
+  const batchLabel = useMemo(
+    () => batchCaptionRatingAll
       ? `${batchTargetCount} (all)`
       : batchCaptionRatingFilter.size > 0
         ? `${batchTargetCount} (rating filter)`
         : selectedIds.size > 0
           ? `${selectedIds.size} selected`
-          : `${uncaptionedCount} uncaptioned`;
+          : `${uncaptionedCount} uncaptioned`,
+    [batchCaptionRatingAll, batchTargetCount, batchCaptionRatingFilter.size, selectedIds.size, uncaptionedCount]
+  );
 
   return (
     <div className="flex flex-col border-t border-border">
@@ -445,9 +470,7 @@ export function AiPanel() {
           className="w-full mb-2 rounded border border-border bg-surface px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
         />
         <div className="max-h-40 overflow-y-auto rounded border border-border bg-surface">
-          {promptTemplates.filter((t) => 
-            t.name.toLowerCase().includes(templateSearch.toLowerCase())
-          ).map((t) => {
+          {filteredTemplates.map((t) => {
             const isSelected = t.id === selectedTemplateId;
             const isDefault = t.id === "descriptive" || t.id === "straightforward" || t.id === "stable_diffusion" || t.id === "midjourney" || t.id === "danbooru" || t.id === "e621" || t.id === "rule34" || t.id === "booru_like" || t.id === "art_critic" || t.id === "product_listing" || t.id === "social_media";
             return (

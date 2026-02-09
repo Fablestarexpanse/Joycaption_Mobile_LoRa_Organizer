@@ -127,3 +127,33 @@ pub fn clear_all_ratings(payload: GetRatingsPayload) -> Result<usize, String> {
     save_ratings(&payload.root_path, &empty)?;
     Ok(count)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RatingChange {
+    pub relative_path: String,
+    pub rating: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRatingsBatchPayload {
+    pub root_path: String,
+    pub changes: Vec<RatingChange>,
+}
+
+/// Set ratings for multiple images in a single operation (reduces file I/O)
+#[tauri::command]
+pub fn set_ratings_batch(payload: SetRatingsBatchPayload) -> Result<(), String> {
+    let mut data = load_ratings(&payload.root_path);
+    
+    for change in &payload.changes {
+        let rating = ImageRating::from_str(&change.rating);
+        if rating == ImageRating::None {
+            data.ratings.remove(&change.relative_path);
+        } else {
+            data.ratings.insert(change.relative_path.clone(), rating.as_str().to_string());
+        }
+    }
+    
+    save_ratings(&payload.root_path, &data)?;
+    Ok(())
+}

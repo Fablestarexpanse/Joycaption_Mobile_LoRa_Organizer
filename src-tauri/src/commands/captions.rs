@@ -1,4 +1,6 @@
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -182,4 +184,54 @@ pub fn clear_all_captions(payload: ClearAllCaptionsPayload) -> Result<ClearAllCa
         cleared += 1;
     }
     Ok(ClearAllCaptionsResult { cleared_count: cleared })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetCaptionsBatchPayload {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CaptionsBatchResult {
+    pub captions: HashMap<String, CaptionData>,
+}
+
+/// Read captions for multiple images in parallel
+#[tauri::command]
+pub fn get_captions_batch(payload: GetCaptionsBatchPayload) -> Result<CaptionsBatchResult, String> {
+    let captions: HashMap<String, CaptionData> = payload
+        .paths
+        .par_iter()
+        .filter_map(|path_str| {
+            let caption_path = caption_path_for(path_str);
+            
+            let caption_data = if caption_path.exists() {
+                match fs::read_to_string(&caption_path) {
+                    Ok(raw) => {
+                        let tags = parse_tags(&raw);
+                        CaptionData {
+                            exists: true,
+                            raw: raw.trim().to_string(),
+                            tags,
+                        }
+                    }
+                    Err(_) => CaptionData {
+                        exists: false,
+                        raw: String::new(),
+                        tags: Vec::new(),
+                    },
+                }
+            } else {
+                CaptionData {
+                    exists: false,
+                    raw: String::new(),
+                    tags: Vec::new(),
+                }
+            };
+            
+            Some((path_str.clone(), caption_data))
+        })
+        .collect();
+
+    Ok(CaptionsBatchResult { captions })
 }

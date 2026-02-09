@@ -79,16 +79,46 @@ export function BatchRenameModal({ isOpen, onClose }: BatchRenameModalProps) {
       // Show updating state
       setIsUpdating(true);
       
-      // Wait for query refetch to complete before closing progress
+      // Update cache directly instead of full refetch for better performance
       if (res.success && rootPath) {
-        // Invalidate and wait for the refetch to complete
-        await queryClient.refetchQueries({ 
-          queryKey: ["project", "images", rootPath],
-          type: 'active'
+        // Build mapping of old paths to new paths
+        const pathMap = new Map<string, string>();
+        relativePaths.forEach((oldPath, idx) => {
+          const pad = Math.max(1, Math.min(12, zeroPad));
+          const newIdx = startIndex + idx;
+          const name = `${(prefix.trim() || "img")}_${String(newIdx).padStart(pad, "0")}`;
+          const ext = targetImages[idx]?.filename.split(".").pop() ?? "png";
+          const newFilename = `${name}.${ext}`;
+          
+          // Get directory from old path
+          const lastSlash = oldPath.lastIndexOf("/");
+          const dir = lastSlash >= 0 ? oldPath.substring(0, lastSlash + 1) : "";
+          const newPath = dir + newFilename;
+          
+          pathMap.set(oldPath, newPath);
         });
         
-        // Add a small delay to ensure the UI has rendered
-        await new Promise(resolve => setTimeout(resolve, 800));
+        // Update the query cache with new paths
+        queryClient.setQueryData(["project", "images", rootPath], (oldData: any) => {
+          if (!Array.isArray(oldData)) return oldData;
+          
+          return oldData.map((img: any) => {
+            const newPath = pathMap.get(img.relative_path);
+            if (newPath) {
+              return {
+                ...img,
+                relative_path: newPath,
+                filename: newPath.split("/").pop() || img.filename,
+                path: img.path.replace(img.relative_path, newPath),
+                id: img.id.replace(img.relative_path, newPath),
+              };
+            }
+            return img;
+          });
+        });
+        
+        // Small delay for UI update
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
       
       setIsUpdating(false);
